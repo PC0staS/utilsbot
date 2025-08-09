@@ -19,6 +19,7 @@ import urllib.parse
 from typing import Optional
 import html
 import pytz
+import time
 
 import urllib.request
 
@@ -48,14 +49,23 @@ async def stats(interaction: discord.Interaction):
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage('/')
     tmp = psutil.disk_usage('/tmp')
-    uptime = psutil.boot_time()
+    # uptime en segundos desde el arranque
+    boot = psutil.boot_time()
+    elapsed = int(time.time() - boot)
+    days = elapsed // 86400
+    rem = elapsed % 86400
+    hours = rem // 3600
+    rem %= 3600
+    minutes = rem // 60
+    seconds = rem % 60
+    uptime_str = f"{days:02d}:{hours:02d}:{minutes:02d}:{seconds:02d}"
     stats_msg = (
         f"**Estadísticas de la Raspberry Pi:**\n"
         f"CPU: {cpu}%\n"
         f"RAM: {mem.percent}% ({mem.used // (1024**2)}MB / {mem.total // (1024**2)}MB)\n"
         f"Disco: {disk.percent}% ({disk.used // (1024**3)}GB / {disk.total // (1024**3)}GB)\n"
         f"TMP: {tmp.percent}% ({tmp.used // (1024**3)}GB / {tmp.total // (1024**3)}GB)\n"
-        f"Uptime: {uptime} segundos"
+        f"Uptime (DD:HH:MM:SS): {uptime_str}"
     )
     await interaction.response.send_message(stats_msg)
 
@@ -67,12 +77,12 @@ async def reboot(interaction: discord.Interaction):
 @bot.tree.command(name="shutdown", description="Apaga la Raspberry Pi")
 async def shutdown(interaction: discord.Interaction):
     os.system("sudo shutdown now")
-    await interaction.response.send_message("Apagando la Raspberry Pi...")
+    await interaction.followup.send("Apagando la Raspberry Pi...")
 
 @bot.tree.command(name="update", description="Actualiza el sistema")
 async def update(interaction: discord.Interaction):
     os.system("sudo apt update && sudo apt upgrade -y")
-    await interaction.response.send_message("Actualizando el sistema...")
+    await interaction.followup.send("Actualizando el sistema...")
 
 @bot.tree.command(name="vpnstatus", description="Muestra el estado de la VPN")
 async def vpnstatus(interaction: discord.Interaction):
@@ -293,18 +303,32 @@ async def translate(
     try:
         q = urllib.parse.quote_plus(text)
         url = f"https://api.mymemory.translated.net/get?q={q}&langpair=auto|{target_code}"
-        raw = await asyncio.to_thread(lambda: urllib.request.urlopen(url, timeout=20).read())
+        def _fetch():
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "utilsbot/1.0 (+https://discord)"
+            })
+            return urllib.request.urlopen(req, timeout=20).read()
+        raw = await asyncio.to_thread(_fetch)
         payload = json.loads(raw.decode("utf-8", errors="ignore"))
-        translated = (payload.get("responseData") or {}).get("translatedText") or ""
-        if not translated:
-            for m in payload.get("matches") or []:
-                if m.get("translation"):
-                    translated = m["translation"]
-                    break
+        status = payload.get("responseStatus", 200)
+        translated = ""
+        if status == 200:
+            translated = (payload.get("responseData") or {}).get("translatedText") or ""
+            if not translated:
+                for m in payload.get("matches") or []:
+                    if m.get("translation"):
+                        translated = m["translation"]
+                        break
+        else:
+            # Si falla, no sobrescribimos el texto con mensajes de error de la API
+            details = payload.get("responseDetails") or ""
+            await interaction.followup.send(
+                f"No se pudo traducir (API): {details}", ephemeral=True
+            )
         if translated:
             text = html.unescape(translated)
-    except Exception:
-        pass
+    except Exception as e:
+        await interaction.followup.send(f"No se pudo traducir: {e}", ephemeral=True)
 
     translated_text = f"Texto traducido a {target_language}: {text}"
 
@@ -351,7 +375,12 @@ async def definition(
     try:
         q = urllib.parse.quote(term)
         url = f"https://api.dictionaryapi.dev/api/v2/entries/{lang_code}/{q}"
-        raw = await asyncio.to_thread(lambda: urllib.request.urlopen(url, timeout=20).read())
+        def _fetch_def():
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "utilsbot/1.0 (+https://discord)"
+            })
+            return urllib.request.urlopen(req, timeout=20).read()
+        raw = await asyncio.to_thread(_fetch_def)
         data = json.loads(raw.decode("utf-8", errors="ignore"))
 
         definitions = []
@@ -385,7 +414,9 @@ async def definition(
             )
         return
     except Exception as e:
-        await interaction.followup.send(f"No se pudo obtener la definición: {e}")
+        await interaction.followup.send(
+            "No se pudo obtener la definición (puede ser límite o bloqueo temporal).", ephemeral=True
+        )
         return
 
     await interaction.followup.send(f"Definición de '{word}' en {language}: ...")
