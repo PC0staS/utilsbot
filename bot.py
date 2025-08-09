@@ -1,15 +1,41 @@
 import os
+import random
+import string
+from urllib import response
+import aiohttp
 import discord
 from discord.ext import commands
 from discord import app_commands
 import psutil
+import asyncio
+import io
+import subprocess
+import datetime
+import tempfile
+from pathlib import Path
+import base64
+import json
+import urllib.parse
+from typing import Optional
+import html
+import pytz
+
+import urllib.request
 
 intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-
+@bot.tree.command(name="help", description="Muestra la lista de comandos")
+async def help(interaction: discord.Interaction):
+    list=(
+        "Comandos disponibles:\n"
+        "- /help: Muestra la lista de comandos\n"
+        "- /Ejemplo: Te saluda"
+        ""
+    )
+    await interaction.response.send_message(list)
 
 @bot.tree.command(name="Ejemplo", description="Te saluda")
 async def ejemplo(interaction: discord.Interaction):
@@ -53,21 +79,439 @@ async def vpnstatus(interaction: discord.Interaction):
     vpn_status = os.popen("sudo wg show").read()
     await interaction.response.send_message(f"Estado de la VPN:\n{vpn_status}")
 
-@bot.tree.command(name="vpnadduser", description="Agrega un nuevo usuario a la VPN")
-async def vpnadduser(interaction: discord.Interaction):
-   await interaction.response.send_message(
-        
-    )
-   
-@bot.tree.command(name="vpnremoveuser", description="Elimina un usuario de la VPN")
-async def vpnremoveuser(interaction: discord.Interaction):
-    await interaction.response.send_message()
-
-@bot.tree.command(name="vpnlistusers", description="Lista los usuarios de la VPN")
-async def vpnlistusers(interaction: discord.Interaction):
-    await interaction.response.send_message()
-
 @bot.tree.command(name="netdevices", description="Lista los dispositivos conectados a la red")
 async def netdevices(interaction: discord.Interaction):
     net_devices = os.popen("ip neigh").read()
     await interaction.response.send_message(f"Dispositivos conectados a la red:\n{net_devices}")
+
+
+
+@bot.tree.command(name="ping", description="Realiza un ping a una dirección IP")
+async def ping(interaction: discord.Interaction, ip_address: str):
+    response = os.popen(f"ping -c 4 {ip_address}").read()
+    await interaction.response.send_message(f"Resultado del ping a {ip_address}:\n{response}")
+
+@bot.tree.command(name="shorten", description="Acorta una url")
+async def shorten(interaction: discord.Interaction, url:str):
+    response = os.popen(f'curl -s "https://is.gd/create.php?format=simple&url={url}"').read()
+    await interaction.response.send_message(f"URL acortada:\n{response}")
+
+@bot.tree.command(name="screenshotweb", description="Toma una captura de pantalla de una página web")
+async def screenshotweb(interaction: discord.Interaction, url: str):
+    if not url.startswith(("http://", "https://")):
+        url = "http://" + url
+
+    await interaction.response.defer()
+
+    import urllib.request
+
+    screenshot_url = f"https://image.thum.io/get/{url}"
+
+    try:
+        image_bytes = await asyncio.to_thread(
+            lambda: urllib.request.urlopen(screenshot_url, timeout=20).read()
+        )
+        file = discord.File(fp=io.BytesIO(image_bytes), filename="screenshot.png")
+        await interaction.followup.send(content=f"Captura de pantalla de {url}:", file=file)
+    except Exception as e:
+        await interaction.followup.send(f"No se pudo obtener la captura: {e}")
+
+
+@bot.tree.command(name="qr", description="Genera un código QR a partir de una URL")
+async def qr(interaction: discord.Interaction, url: str):
+    if not url.startswith(("http://", "https://")):
+        url = "http://" + url
+
+    qr_url = f"https://api.qrserver.com/v1/create-qr-code/?data={url}&size=200x200"
+
+    try:
+        image_bytes = await asyncio.to_thread(
+            lambda: urllib.request.urlopen(qr_url, timeout=20).read()
+        )
+        file = discord.File(fp=io.BytesIO(image_bytes), filename="qr.png")
+        await interaction.response.send_message(content=f"Código QR de {url}:", file=file)
+    except Exception as e:
+        await interaction.response.send_message(f"No se pudo generar el código QR: {e}")
+
+
+@bot.tree.command(name="passw", description="Genera una contraseña")
+async def passw(interaction: discord.Interaction, chars: int):
+    await interaction.response.defer()
+    password = ''.join(random.choices(string.ascii_letters + string.digits, k=chars))
+    await interaction.followup.send(f"Aquí tienes tu contraseña: {password}")
+
+@bot.tree.command(name="mergepdf", description="Junta varios PDF adjuntos en uno solo")
+@app_commands.describe(
+    file1="PDF 1 (obligatorio)",
+    file2="PDF 2 (opcional)",
+    file3="PDF 3 (opcional)",
+    file4="PDF 4 (opcional)",
+    file5="PDF 5 (opcional)",
+)
+async def mergepdf(
+    interaction: discord.Interaction,
+    file1: discord.Attachment,
+    file2: Optional[discord.Attachment] = None,
+    file3: Optional[discord.Attachment] = None,
+    file4: Optional[discord.Attachment] = None,
+    file5: Optional[discord.Attachment] = None,
+):
+    await interaction.response.defer()
+
+    attachments = [f for f in [file1, file2, file3, file4, file5] if f is not None]
+    if len(attachments) < 2:
+        await interaction.followup.send("Adjunta al menos 2 PDFs.", ephemeral=True)
+        return
+
+    # Validación básica de tipo
+    for a in attachments:
+        name = (a.filename or "").lower()
+        ctype = (a.content_type or "").lower()
+        if not (name.endswith(".pdf") or "pdf" in ctype):
+            await interaction.followup.send(f"'{a.filename}' no parece ser un PDF.", ephemeral=True)
+            return
+
+    try:
+        from pypdf import PdfReader, PdfWriter  # type: ignore
+    except Exception:
+        await interaction.followup.send(
+            "Falta la librería pypdf. Instálala con: pip install pypdf",
+            ephemeral=True,
+        )
+        return
+
+    # Descargar y fusionar
+    writer = PdfWriter()
+    try:
+        for a in attachments:
+            data = await a.read()
+            reader = PdfReader(io.BytesIO(data))
+            # Manejar PDFs encriptados sin contraseña
+            if reader.is_encrypted:
+                try:
+                    reader.decrypt("")
+                except Exception:
+                    await interaction.followup.send(
+                        f"El PDF '{a.filename}' está protegido y no se puede abrir.",
+                        ephemeral=True,
+                    )
+                    return
+            for page in reader.pages:
+                writer.add_page(page)
+
+        buf = io.BytesIO()
+        writer.write(buf)
+        writer.close()
+        buf.seek(0)
+    except Exception as e:
+        await interaction.followup.send(f"No se pudieron combinar los PDFs: {e}", ephemeral=True)
+        return
+
+    merged_name = "merged.pdf"
+    data = buf.getvalue()
+    LIMIT = 24 * 1024 * 1024  # ~24 MiB seguro para adjuntar
+
+    if len(data) <= LIMIT:
+        await interaction.followup.send(
+            content="Aquí tienes tu PDF combinado:",
+            file=discord.File(fp=io.BytesIO(data), filename=merged_name),
+        )
+        return
+    else:
+        await interaction.followup.send(
+            "El PDF combinado excede el límite para adjuntar",
+            ephemeral=True,
+        )
+
+@bot.tree.command(name="remind", description="Crea un recordatorio")
+@app_commands.describe(
+    time="Tiempo hasta el recordatorio (en minutos)",
+    message="Mensaje del recordatorio"
+)
+async def remind(
+    interaction: discord.Interaction,
+    time: int,
+    message: str
+):
+    await interaction.response.defer()
+
+    if time < 1:
+        await interaction.followup.send("El tiempo debe ser al menos 1 minuto.", ephemeral=True)
+        return
+
+    await interaction.followup.send(f"Recordatorio configurado para dentro de {time} minutos.")
+
+    await asyncio.sleep(time * 60)
+    await interaction.followup.send(f"¡Recordatorio! {message}")
+
+
+@bot.tree.command(name="translate", description="Traduce un texto a otro idioma")
+@app_commands.describe(
+    text="Texto a traducir",
+    target_language="Idioma al que traducir"
+)
+async def translate(
+    interaction: discord.Interaction,
+    text: str,
+    target_language: str
+):
+    await interaction.response.defer()
+
+    # Normaliza idioma objetivo y traduce usando MyMemory API
+
+    lang_map = {
+        "es": "es", "español": "es", "spanish": "es",
+        "en": "en", "ingles": "en", "inglés": "en", "english": "en",
+        "fr": "fr", "frances": "fr", "francés": "fr", "french": "fr",
+        "de": "de", "aleman": "de", "alemán": "de", "german": "de",
+        "it": "it", "italiano": "it", "italian": "it",
+        "pt": "pt", "portugues": "pt", "portugués": "pt", "portuguese": "pt",
+        "ru": "ru", "ruso": "ru", "russian": "ru",
+        "ja": "ja", "japones": "ja", "japonés": "ja", "japanese": "ja",
+        "zh": "zh", "chino": "zh", "chinese": "zh",
+        "ar": "ar", "arabe": "ar", "árabe": "ar", "arabic": "ar",
+        "nl": "nl", "holandes": "nl", "holandés": "nl", "dutch": "nl",
+        "pl": "pl", "polaco": "pl", "polish": "pl",
+        "sv": "sv", "sueco": "sv", "swedish": "sv",
+        "tr": "tr", "turco": "tr", "turkish": "tr",
+        "ko": "ko", "coreano": "ko", "korean": "ko",
+        "cs": "cs", "checo": "cs", "czech": "cs",
+        "ca": "ca", "catalan": "ca", "catalán": "ca",
+        "gl": "gl", "gallego": "gl",
+        "eu": "eu", "euskera": "eu", "basque": "eu",
+    }
+
+    norm = (target_language or "").strip().lower()
+    target_code = lang_map.get(norm)
+    if not target_code:
+        candidate = norm.replace("_", "-")
+        if candidate.isalpha() or ("-" in candidate and candidate.replace("-", "").isalpha()):
+            target_code = candidate[:5]  # acepta códigos como pt-br
+        else:
+            target_code = "es"
+
+    try:
+        q = urllib.parse.quote_plus(text)
+        url = f"https://api.mymemory.translated.net/get?q={q}&langpair=auto|{target_code}"
+        raw = await asyncio.to_thread(lambda: urllib.request.urlopen(url, timeout=20).read())
+        payload = json.loads(raw.decode("utf-8", errors="ignore"))
+        translated = (payload.get("responseData") or {}).get("translatedText") or ""
+        if not translated:
+            for m in payload.get("matches") or []:
+                if m.get("translation"):
+                    translated = m["translation"]
+                    break
+        if translated:
+            text = html.unescape(translated)
+    except Exception:
+        pass
+
+    translated_text = f"Texto traducido a {target_language}: {text}"
+
+    await interaction.followup.send(translated_text)
+
+
+@bot.tree.command(name="definition", description="Busca la definición de una palabra")
+@app_commands.describe(
+    word="Palabra a buscar",
+    language="Idioma en el que buscar la definición (opcional, por defecto es español)"
+)
+async def definition(
+    interaction: discord.Interaction,
+    word: str,
+    language: str = "es"
+):
+    await interaction.response.defer()
+
+    # Normaliza el idioma y consulta la API pública de DictionaryAPI
+    lang_aliases = {
+        "es": "es", "español": "es", "spanish": "es",
+        "en": "en", "ingles": "en", "inglés": "en", "english": "en",
+        "fr": "fr", "frances": "fr", "francés": "fr", "french": "fr",
+        "de": "de", "aleman": "de", "alemán": "de", "german": "de",
+        "it": "it", "italiano": "it", "italian": "it",
+        "pt": "pt-BR", "pt-br": "pt-BR", "portugues": "pt-BR", "portugués": "pt-BR", "portuguese": "pt-BR",
+        "ru": "ru", "ruso": "ru", "russian": "ru",
+        "ja": "ja", "japones": "ja", "japonés": "ja", "japanese": "ja",
+        "ko": "ko", "coreano": "ko", "korean": "ko",
+        "ar": "ar", "arabe": "ar", "árabe": "ar", "arabic": "ar",
+        "tr": "tr", "turco": "tr", "turkish": "tr",
+        "hi": "hi", "hindi": "hi",
+    }
+    norm_lang = (language or "es").strip().lower()
+    lang_code = lang_aliases.get(norm_lang, norm_lang if norm_lang else "es")
+    if lang_code in ("pt", "pt_br"):
+        lang_code = "pt-BR"
+
+    term = (word or "").strip()
+    if not term:
+        await interaction.followup.send("Proporciona una palabra válida.")
+        return
+
+    try:
+        q = urllib.parse.quote(term)
+        url = f"https://api.dictionaryapi.dev/api/v2/entries/{lang_code}/{q}"
+        raw = await asyncio.to_thread(lambda: urllib.request.urlopen(url, timeout=20).read())
+        data = json.loads(raw.decode("utf-8", errors="ignore"))
+
+        definitions = []
+        if isinstance(data, list):
+            for entry in data:
+                for meaning in entry.get("meanings", []):
+                    pos = meaning.get("partOfSpeech") or ""
+                    for d in meaning.get("definitions", []):
+                        txt = d.get("definition")
+                        if txt:
+                            if pos:
+                                definitions.append(f"- ({pos}) {txt}")
+                            else:
+                                definitions.append(f"- {txt}")
+                            if len(definitions) >= 6:
+                                break
+                    if len(definitions) >= 6:
+                        break
+                if len(definitions) >= 6:
+                    break
+
+        if definitions:
+            await interaction.followup.send(
+                f"Definición de '{word}' en {language}:\n" + "\n".join(definitions)
+            )
+        else:
+            # Mensaje de no encontrado
+            msg = data.get("message") if isinstance(data, dict) else None
+            await interaction.followup.send(
+                msg or f"No se encontraron definiciones para '{word}' en {language}."
+            )
+        return
+    except Exception as e:
+        await interaction.followup.send(f"No se pudo obtener la definición: {e}")
+        return
+
+    await interaction.followup.send(f"Definición de '{word}' en {language}: ...")
+
+
+@bot.tree.command(name="weather", description="Muestra el tiempo actual de una ciudad (sin API key)")
+async def weather(interaction: discord.Interaction, lugar: str):
+    await interaction.response.defer()
+
+    def code_info(code: int | None) -> tuple[str, str]:
+        mapping = {
+            0: ("Despejado", "☀️"),
+            1: ("Mayormente despejado", "🌤️"),
+            2: ("Parcialmente nublado", "⛅"),
+            3: ("Nublado", "☁️"),
+            45: ("Niebla", "🌫️"),
+            48: ("Niebla con escarcha", "🌫️"),
+            51: ("Llovizna ligera", "🌦️"),
+            53: ("Llovizna moderada", "🌦️"),
+            55: ("Llovizna intensa", "🌧️"),
+            56: ("Llovizna helada ligera", "🌧️"),
+            57: ("Llovizna helada intensa", "🌧️"),
+            61: ("Lluvia ligera", "🌧️"),
+            63: ("Lluvia moderada", "🌧️"),
+            65: ("Lluvia intensa", "🌧️"),
+            66: ("Lluvia helada ligera", "🌧️"),
+            67: ("Lluvia helada intensa", "🌧️"),
+            71: ("Nieve ligera", "🌨️"),
+            73: ("Nieve moderada", "🌨️"),
+            75: ("Nieve intensa", "❄️"),
+            77: ("Granizo fino", "🌨️"),
+            80: ("Chubascos ligeros", "🌦️"),
+            81: ("Chubascos moderados", "🌦️"),
+            82: ("Chubascos fuertes", "🌧️"),
+            85: ("Chubascos de nieve ligeros", "🌨️"),
+            86: ("Chubascos de nieve fuertes", "❄️"),
+            95: ("Tormenta", "⛈️"),
+            96: ("Tormenta con granizo", "⛈️"),
+            99: ("Tormenta fuerte con granizo", "⛈️"),
+        }
+        return mapping.get(int(code) if code is not None else -1, ("Tiempo", "🌡️"))
+
+    try:
+        # Geocodificar el lugar
+        geo_url = (
+            "https://geocoding-api.open-meteo.com/v1/search?" +
+            urllib.parse.urlencode({"name": lugar, "count": 1, "language": "es", "format": "json"})
+        )
+        geo_bytes = await asyncio.to_thread(lambda: urllib.request.urlopen(geo_url, timeout=15).read())
+        geo = json.loads(geo_bytes.decode("utf-8"))
+        results = geo.get("results") or []
+        if not results:
+            await interaction.followup.send("No encontré esa ubicación.", ephemeral=True)
+            return
+        g = results[0]
+        lat, lon = g["latitude"], g["longitude"]
+        loc_name = g.get("name")
+        admin1 = g.get("admin1")
+        country = g.get("country")
+
+        # Tiempo actual
+        current_params = ",".join([
+            "temperature_2m",
+            "relative_humidity_2m",
+            "apparent_temperature",
+            "is_day",
+            "precipitation",
+            "weather_code",
+            "wind_speed_10m",
+            "wind_direction_10m",
+        ])
+        fc_url = (
+            "https://api.open-meteo.com/v1/forecast?" +
+            urllib.parse.urlencode({
+                "latitude": lat,
+                "longitude": lon,
+                "current": current_params,
+                "timezone": "auto",
+                "windspeed_unit": "kmh",
+            })
+        )
+        fc_bytes = await asyncio.to_thread(lambda: urllib.request.urlopen(fc_url, timeout=15).read())
+        data = json.loads(fc_bytes.decode("utf-8"))
+        current = data.get("current") or {}
+
+        temp = current.get("temperature_2m")
+        app_temp = current.get("apparent_temperature")
+        rh = current.get("relative_humidity_2m")
+        wind = current.get("wind_speed_10m")
+        wind_dir = current.get("wind_direction_10m")
+        code = current.get("weather_code")
+        desc, emoji = code_info(code)
+
+        header = f"Tiempo en {loc_name}"
+        if admin1:
+            header += f", {admin1}"
+        if country:
+            header += f", {country}"
+
+        msg = f"{header}:\n{emoji} {desc}\n"
+        if temp is not None:
+            msg += f"Temp: {temp}°C"
+            if app_temp is not None:
+                msg += f" (sensación {app_temp}°C)"
+            msg += "\n"
+        if rh is not None:
+            msg += f"Humedad: {rh}%\n"
+        if wind is not None:
+            msg += f"Viento: {wind} km/h"
+            if wind_dir is not None:
+                msg += f" ({wind_dir}°)"
+            msg += "\n"
+
+        await interaction.followup.send(msg)
+    except Exception as e:
+        await interaction.followup.send(f"No pude obtener el clima: {e}", ephemeral=True)
+
+@bot.tree.command(name="timezone", description="Consulta la hora en otra zona horaria")
+async def timezone(interaction: discord.Interaction, zona: str):
+    await interaction.response.defer()
+    try:
+        # Obtener la hora actual en la zona horaria especificada
+        tz = pytz.timezone(zona)
+        hora_actual = datetime.datetime.now(tz).strftime("%H:%M:%S")
+        await interaction.followup.send(f"La hora actual en {zona} es {hora_actual}.")
+    except Exception as e:
+        await interaction.followup.send(f"No pude obtener la hora: {e}", ephemeral=True)
+        await interaction.followup.send(f"No pude obtener la hora: {e}", ephemeral=True)
+
