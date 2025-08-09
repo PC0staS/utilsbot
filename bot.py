@@ -89,12 +89,12 @@ async def netdevices(interaction: discord.Interaction):
 @bot.tree.command(name="ping", description="Realiza un ping a una dirección IP")
 async def ping(interaction: discord.Interaction, ip_address: str):
     response = os.popen(f"ping -c 4 {ip_address}").read()
-    await interaction.response.send_message(f"Resultado del ping a {ip_address}:\n{response}")
+    await interaction.followup.send(f"Resultado del ping a {ip_address}:\n{response}")
 
 @bot.tree.command(name="shorten", description="Acorta una url")
 async def shorten(interaction: discord.Interaction, url:str):
     response = os.popen(f'curl -s "https://is.gd/create.php?format=simple&url={url}"').read()
-    await interaction.response.send_message(f"URL acortada:\n{response}")
+    await interaction.followup.send(f"URL acortada:\n{response}")
 
 @bot.tree.command(name="screenshotweb", description="Toma una captura de pantalla de una página web")
 async def screenshotweb(interaction: discord.Interaction, url: str):
