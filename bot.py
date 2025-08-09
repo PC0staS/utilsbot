@@ -515,3 +515,23 @@ async def timezone(interaction: discord.Interaction, zona: str):
         await interaction.followup.send(f"No pude obtener la hora: {e}", ephemeral=True)
         await interaction.followup.send(f"No pude obtener la hora: {e}", ephemeral=True)
 
+
+@bot.event
+async def on_ready():
+    # Sincroniza los slash commands con Discord al iniciar
+    try:
+        synced = await bot.tree.sync()
+        print(f"Slash commands sincronizados: {len(synced)}")
+    except Exception as e:
+        print(f"No se pudieron sincronizar los comandos: {e}")
+    user = getattr(bot, "user", None)
+    if user:
+        print(f"Conectado como {user} (ID: {user.id})")
+
+
+if __name__ == "__main__":
+    token = "Secret"
+    if not token:
+        raise SystemExit("Falta la variable de entorno DISCORD_TOKEN.")
+    bot.run(token)
+
