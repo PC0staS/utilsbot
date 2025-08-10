@@ -20,6 +20,7 @@ from typing import Optional
 import html
 import pytz
 import time
+import platform
 
 import urllib.request
 
@@ -71,40 +72,58 @@ async def stats(interaction: discord.Interaction):
 
 @bot.tree.command(name="reboot", description="Reinicia la Raspberry Pi")
 async def reboot(interaction: discord.Interaction):
-    os.system("sudo reboot")
-    await interaction.response.send_message("Reiniciando la Raspberry Pi...")
+    await interaction.response.defer(ephemeral=True)
+    await interaction.followup.send("Reiniciando la Raspberry Pi...", ephemeral=True)
+    # Run reboot in background to avoid blocking
+    asyncio.create_task(asyncio.to_thread(os.system, "sudo reboot"))
 
 @bot.tree.command(name="shutdown", description="Apaga la Raspberry Pi")
 async def shutdown(interaction: discord.Interaction):
-    os.system("sudo shutdown now")
-    await interaction.followup.send("Apagando la Raspberry Pi...")
+    await interaction.response.defer(ephemeral=True)
+    await interaction.followup.send("Apagando la Raspberry Pi...", ephemeral=True)
+    asyncio.create_task(asyncio.to_thread(os.system, "sudo shutdown now"))
 
 @bot.tree.command(name="update", description="Actualiza el sistema")
 async def update(interaction: discord.Interaction):
-    os.system("sudo apt update && sudo apt upgrade -y")
-    await interaction.followup.send("Actualizando el sistema...")
+    await interaction.response.defer(ephemeral=True)
+    await interaction.followup.send("Actualizando el sistema...", ephemeral=True)
+    
+    async def _run_update():
+        code = await asyncio.to_thread(os.system, "sudo apt update && sudo apt upgrade -y")
+        try:
+            await interaction.followup.send(f"Actualización finalizada (código {code}).", ephemeral=True)
+        except Exception:
+            pass
+    
+    asyncio.create_task(_run_update())
 
 @bot.tree.command(name="vpnstatus", description="Muestra el estado de la VPN")
 async def vpnstatus(interaction: discord.Interaction):
-    vpn_status = os.popen("sudo wg show").read()
-    await interaction.response.send_message(f"Estado de la VPN:\n{vpn_status}")
+    await interaction.response.defer()
+    vpn_status = await asyncio.to_thread(lambda: os.popen("sudo wg show").read())
+    await interaction.followup.send(f"Estado de la VPN:\n{vpn_status}")
 
 @bot.tree.command(name="netdevices", description="Lista los dispositivos conectados a la red")
 async def netdevices(interaction: discord.Interaction):
-    net_devices = os.popen("ip neigh").read()
-    await interaction.response.send_message(f"Dispositivos conectados a la red:\n{net_devices}")
+    await interaction.response.defer()
+    net_devices = await asyncio.to_thread(lambda: os.popen("ip neigh").read())
+    await interaction.followup.send(f"Dispositivos conectados a la red:\n{net_devices}")
 
 
 
 @bot.tree.command(name="ping", description="Realiza un ping a una dirección IP")
 async def ping(interaction: discord.Interaction, ip_address: str):
-    response = os.popen(f"ping -c 4 {ip_address}").read()
-    await interaction.followup.send(f"Resultado del ping a {ip_address}:\n{response}")
+    await interaction.response.defer()
+    # Use appropriate flag for Windows (-n) vs Linux (-c)
+    flag = "-n" if platform.system().lower().startswith("win") else "-c"
+    result = await asyncio.to_thread(lambda: os.popen(f"ping {flag} 4 {ip_address}").read())
+    await interaction.followup.send(f"Resultado del ping a {ip_address}:\n{result}")
 
 @bot.tree.command(name="shorten", description="Acorta una url")
 async def shorten(interaction: discord.Interaction, url:str):
-    response = os.popen(f'curl -s "https://is.gd/create.php?format=simple&url={url}"').read()
-    await interaction.followup.send(f"URL acortada:\n{response}")
+    await interaction.response.defer()
+    result = await asyncio.to_thread(lambda: os.popen(f'curl -s "https://is.gd/create.php?format=simple&url={url}"').read())
+    await interaction.followup.send(f"URL acortada:\n{result}")
 
 @bot.tree.command(name="screenshotweb", description="Toma una captura de pantalla de una página web")
 async def screenshotweb(interaction: discord.Interaction, url: str):
@@ -129,6 +148,7 @@ async def screenshotweb(interaction: discord.Interaction, url: str):
 
 @bot.tree.command(name="qr", description="Genera un código QR a partir de una URL")
 async def qr(interaction: discord.Interaction, url: str):
+    await interaction.response.defer()
     if not url.startswith(("http://", "https://")):
         url = "http://" + url
 
@@ -139,9 +159,9 @@ async def qr(interaction: discord.Interaction, url: str):
             lambda: urllib.request.urlopen(qr_url, timeout=20).read()
         )
         file = discord.File(fp=io.BytesIO(image_bytes), filename="qr.png")
-        await interaction.response.send_message(content=f"Código QR de {url}:", file=file)
+        await interaction.followup.send(content=f"Código QR de {url}:", file=file)
     except Exception as e:
-        await interaction.response.send_message(f"No se pudo generar el código QR: {e}")
+        await interaction.followup.send(f"No se pudo generar el código QR: {e}")
 
 
 @bot.tree.command(name="passw", description="Genera una contraseña")
@@ -302,7 +322,8 @@ async def translate(
 
     try:
         q = urllib.parse.quote_plus(text)
-        url = f"https://api.mymemory.translated.net/get?q={q}&langpair=auto|{target_code}"
+        # Use 'es' as source language instead of 'auto' to avoid API error
+        url = f"https://api.mymemory.translated.net/get?q={q}&langpair=es|{target_code}"
         def _fetch():
             req = urllib.request.Request(url, headers={
                 "User-Agent": "utilsbot/1.0 (+https://discord)"
@@ -319,16 +340,26 @@ async def translate(
                     if m.get("translation"):
                         translated = m["translation"]
                         break
-        else:
-            # Si falla, no sobrescribimos el texto con mensajes de error de la API
-            details = payload.get("responseDetails") or ""
-            await interaction.followup.send(
-                f"No se pudo traducir (API): {details}", ephemeral=True
-            )
-        if translated:
+        if translated and translated.lower() != text.lower():
             text = html.unescape(translated)
+        elif status != 200:
+            # If API fails, try with English as source
+            try:
+                url2 = f"https://api.mymemory.translated.net/get?q={q}&langpair=en|{target_code}"
+                req2 = urllib.request.Request(url2, headers={
+                    "User-Agent": "utilsbot/1.0 (+https://discord)"
+                })
+                raw2 = await asyncio.to_thread(lambda: urllib.request.urlopen(req2, timeout=20).read())
+                payload2 = json.loads(raw2.decode("utf-8", errors="ignore"))
+                if payload2.get("responseStatus", 200) == 200:
+                    alt_translated = (payload2.get("responseData") or {}).get("translatedText") or ""
+                    if alt_translated and alt_translated.lower() != text.lower():
+                        text = html.unescape(alt_translated)
+            except Exception:
+                pass
     except Exception as e:
         await interaction.followup.send(f"No se pudo traducir: {e}", ephemeral=True)
+        return
 
     translated_text = f"Texto traducido a {target_language}: {text}"
 
@@ -414,12 +445,49 @@ async def definition(
             )
         return
     except Exception as e:
+        # Try English as fallback before giving up
+        print(f"Definition API error for {lang_code}: {e}")  # Debug log
+        if lang_code != "en":
+            try:
+                q_en = urllib.parse.quote(term)
+                url_en = f"https://api.dictionaryapi.dev/api/v2/entries/en/{q_en}"
+                req_en = urllib.request.Request(url_en, headers={
+                    "User-Agent": "utilsbot/1.0 (+https://discord)"
+                })
+                raw_en = await asyncio.to_thread(lambda: urllib.request.urlopen(req_en, timeout=20).read())
+                data_en = json.loads(raw_en.decode("utf-8", errors="ignore"))
+                
+                definitions = []
+                if isinstance(data_en, list):
+                    for entry in data_en:
+                        for meaning in entry.get("meanings", []):
+                            pos = meaning.get("partOfSpeech") or ""
+                            for d in meaning.get("definitions", []):
+                                txt = d.get("definition")
+                                if txt:
+                                    if pos:
+                                        definitions.append(f"- ({pos}) {txt}")
+                                    else:
+                                        definitions.append(f"- {txt}")
+                                    if len(definitions) >= 3:
+                                        break
+                            if len(definitions) >= 3:
+                                break
+                        if len(definitions) >= 3:
+                            break
+                
+                if definitions:
+                    await interaction.followup.send(
+                        f"Definición de '{word}' en inglés (no encontrada en {language}):\n" + "\n".join(definitions)
+                    )
+                    return
+            except Exception as e2:
+                print(f"Definition fallback error: {e2}")  # Debug log
+                pass
+        
         await interaction.followup.send(
-            "No se pudo obtener la definición (puede ser límite o bloqueo temporal).", ephemeral=True
+            f"No se pudo obtener la definición. Error: {str(e)[:100]}", ephemeral=True
         )
-        return
-
-    await interaction.followup.send(f"Definición de '{word}' en {language}: ...")
 
 
 @bot.tree.command(name="weather", description="Muestra el tiempo actual de una ciudad (sin API key)")
@@ -544,8 +612,15 @@ async def timezone(interaction: discord.Interaction, zona: str):
         await interaction.followup.send(f"La hora actual en {zona} es {hora_actual}.")
     except Exception as e:
         await interaction.followup.send(f"No pude obtener la hora: {e}", ephemeral=True)
-        await interaction.followup.send(f"No pude obtener la hora: {e}", ephemeral=True)
 
+@bot.tree.command(name="restart", description="Reincia el bot")
+async def restart(interaction: discord.Interaction):
+    await interaction.response.defer()
+    try:
+        os.system("sudo systemctl restart utilsbot.service")
+    except Exception as e:
+        await interaction.followup.send(f"No pude reiniciar el bot: {e}", ephemeral=True)
+    await interaction.followup.send("Reiniciando el bot...", ephemeral=True)
 
 @bot.event
 async def on_ready():
@@ -561,7 +636,7 @@ async def on_ready():
 
 
 if __name__ == "__main__":
-    token = "Secret"
+    token = Secret""
     if not token:
         raise SystemExit("Falta la variable de entorno DISCORD_TOKEN.")
     bot.run(token)
