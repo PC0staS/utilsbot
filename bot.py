@@ -31,11 +31,29 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.tree.command(name="help", description="Muestra la lista de comandos")
 async def help(interaction: discord.Interaction):
-    list=(
+    list = (
         "Comandos disponibles:\n"
         "- /help: Muestra la lista de comandos\n"
-        "- /Ejemplo: Te saluda"
-        ""
+        "- /ejemplo: Te saluda\n"
+        "- /stats: Muestra estadísticas\n"
+        "- /reboot: Reinicia la Raspberry Pi\n"
+        "- /shutdown: Apaga la Raspberry Pi\n"
+        "- /update: Actualiza el sistema\n"
+        "- /vpnstatus: Muestra el estado de la VPN\n"
+        "- /netdevices: Lista los dispositivos conectados a la red\n"
+        "- /ping <ip_address>: Realiza un ping a una dirección IP\n"
+        "- /shorten <url>: Acorta una URL\n"
+        "- /screenshotweb <url>: Toma una captura de pantalla de una página web\n"
+        "- /qr <url>: Genera un código QR a partir de una URL\n"
+        "- /passw <chars>: Genera una contraseña\n"
+        "- /mergepdf <file1> [file2..file5]: Junta varios PDF adjuntos en uno solo\n"
+        "- /remind <time> <message>: Crea un recordatorio (minutos)\n"
+        "- /translate <text> <target_language>: Traduce un texto a otro idioma\n"
+        "- /definition <word> [language]: Busca la definición de una palabra\n"
+        "- /weather <lugar>: Muestra el tiempo actual de una ciudad\n"
+        "- /timezone <zona>: Consulta la hora en otra zona horaria\n"
+        "- /restart: Reinicia el bot\n"
+        "- /execute <command>: Ejecuta un comando en la Raspberry Pi"
     )
     await interaction.response.send_message(list)
 
