@@ -622,6 +622,15 @@ async def restart(interaction: discord.Interaction):
         await interaction.followup.send(f"No pude reiniciar el bot: {e}", ephemeral=True)
     await interaction.followup.send("Reiniciando el bot...", ephemeral=True)
 
+@bot.tree.command(name="execute", description="Ejecuta un comando en la Raspberry Pi")
+async def execute(interaction: discord.Interaction, command: str):
+    await interaction.response.defer()
+    try:
+        output = await asyncio.to_thread(lambda: subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT))
+        await interaction.followup.send(f"Salida del comando:\n```\n{output.decode()}\n```")
+    except Exception as e:
+        await interaction.followup.send(f"No pude ejecutar el comando: {e}", ephemeral=True)
+
 @bot.event
 async def on_ready():
     # Sincroniza los slash commands con Discord al iniciar
