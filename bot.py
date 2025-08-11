@@ -23,13 +23,16 @@ import pytz
 import time
 import platform
 import shutil
-
 import urllib.request
+import hashlib
+from cryptography.fernet import Fernet
 
 intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+habitslist = []
 
 # —— Salida a Nextcloud ——
 def _get_base_nextcloud_dir() -> Path:
@@ -205,6 +208,19 @@ async def shorten(interaction: discord.Interaction, url:str):
     await interaction.response.defer()
     result = await asyncio.to_thread(lambda: os.popen(f'curl -s "https://is.gd/create.php?format=simple&url={url}"').read())
     await interaction.followup.send(f"URL acortada:\n{result}")
+
+
+@bot.tree.command(name="whois", description="Busca información de un dominio")
+async def whois(interaction: discord.Interaction, domain: str):
+    await interaction.response.defer()
+    result = await asyncio.to_thread(lambda: os.popen(f"whois {domain}").read())
+    await interaction.followup.send(f"Información de {domain}:\n```\n{result}\n```")
+
+@bot.tree.command(name="speedtest", description="Realiza una prueba de velocidad de internet")
+async def speedtest(interaction: discord.Interaction):
+    await interaction.response.defer()
+    result = await asyncio.to_thread(lambda: os.popen("speedtest-cli --secure --simple").read())
+    await interaction.followup.send(f"Resultado de la prueba de velocidad:\n```\n{result}\n```")
 
 @bot.tree.command(name="webping", description="Comprueba una URL (HTTP) y mide latencia")
 @app_commands.describe(url="URL a comprobar (http/https)", veces="Número de intentos (1-5, por defecto 3)")
@@ -619,6 +635,65 @@ async def remind(
     await interaction.followup.send(f"¡Recordatorio! {message}")
 
 
+@bot.tree.command(name="habit", description="Crea un recordatorio recurrente")
+@app_commands.describe(
+    time="Tiempo entre repeticiones (en minutos)",
+    message="Mensaje del recordatorio"
+)
+async def habit(
+    interaction: discord.Interaction,
+    time: int,
+    message: str
+):
+    await interaction.response.defer()
+
+    if time < 1:
+        await interaction.followup.send("El tiempo debe ser al menos 1 minuto.", ephemeral=True)
+        return
+
+    await interaction.followup.send(f"Recordatorio recurrente configurado cada {time} minutos.")
+
+    habitslist.append((time, message))
+    
+    for time, message in habitslist:
+        while True:
+            await asyncio.sleep(time * 60)
+            await interaction.followup.send(f"¡Recordatorio! {message}")
+
+
+@bot.tree.command(name="listhabit", description="Lista habits")
+async def listhabit(interaction: discord.Interaction):
+    await interaction.response.defer()
+
+    if not habitslist:
+        await interaction.followup.send("No hay habits configurados.")
+        return
+
+    habit_messages = [f"- Cada {time} minutos: {message}" for time, message in habitslist]
+    await interaction.followup.send("Lista de habits:\n" + "\n".join(habit_messages))
+
+@bot.tree.command(name="deletehabit", description="Elimina un habit")
+@app_commands.describe(
+    message="Mensaje del habit a eliminar"
+)
+async def deletehabit(
+    interaction: discord.Interaction,
+    message: str
+):
+    await interaction.response.defer()
+
+    for i, (time, msg) in enumerate(habitslist):
+        if msg == message:
+            habitslist.pop(i)
+            await interaction.followup.send(f"Habit eliminado: Cada {time} minutos: {msg}")
+            return
+
+    await interaction.followup.send("Habit no encontrado.", ephemeral=True)
+    return
+
+
+
+
 @bot.tree.command(name="translate", description="Traduce un texto a otro idioma")
 @app_commands.describe(
     text="Texto a traducir",
@@ -975,6 +1050,56 @@ async def execute(interaction: discord.Interaction, command: str):
         await interaction.followup.send(f"Salida del comando:\n```\n{output.decode()}\n```")
     except Exception as e:
         await interaction.followup.send(f"No pude ejecutar el comando: {e}", ephemeral=True)
+
+@bot.tree.command(name="roll", description="Rolls a dice")
+async def roll(interaction: discord.Interaction, dices: int, sides: int = 6):
+    await interaction.response.defer()
+    results = [random.randint(1, sides) for _ in range(dices)]
+    await interaction.followup.send(f"Resultados de la tirada de {dices} dados de {sides} caras: {results}")
+
+@bot.tree.command(name="encrypt", description="Encripta un mensaje")
+async def encrypt(interaction: discord.Interaction, message: str, key:str):
+    await interaction.response.defer()
+    try:
+        fernet = Fernet(key)
+        encrypted = fernet.encrypt(message.encode()).decode()
+        await interaction.followup.send(f"Mensaje encriptado:\n```\n{encrypted}\n```")
+    except Exception as e:
+        await interaction.followup.send(f"No pude encriptar el mensaje: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="decrypt", description="Desencripta un mensaje")
+async def decrypt(interaction: discord.Interaction, message: str, key: str):
+    await interaction.response.defer()
+    try:
+        fernet = Fernet(key)
+        decrypted = fernet.decrypt(message.encode()).decode()
+        await interaction.followup.send(f"Mensaje desencriptado:\n```\n{decrypted}\n```")
+    except Exception as e:
+        await interaction.followup.send(f"No pude desencriptar el mensaje: {e}", ephemeral=True)
+
+@bot.tree.command(name="hash", description="Genera un hash de un mensaje(por defecto Sha-256)")
+async def hash(interaction: discord.Interaction, message: str, algorithm: str = "sha256"):
+    await interaction.response.defer()
+    try:
+        if algorithm == "sha256":
+            hash_object = hashlib.sha256(message.encode())
+        elif algorithm == "sha512":
+            hash_object = hashlib.sha512(message.encode())
+        elif algorithm == "blake2b":
+            hash_object = hashlib.blake2b(message.encode())
+        elif algorithm == "blake2s":
+            hash_object = hashlib.blake2s(message.encode())
+        elif algorithm == "md5":
+            hash_object = hashlib.md5(message.encode())
+        else:
+            await interaction.followup.send(f"Algoritmo no soportado: {algorithm}", ephemeral=True)
+            return
+
+        hash_hex = hash_object.hexdigest()
+        await interaction.followup.send(f"Hash ({algorithm}):\n```\n{hash_hex}\n```")
+    except Exception as e:
+        await interaction.followup.send(f"No pude generar el hash: {e}", ephemeral=True)
 
 @bot.event
 async def on_ready():

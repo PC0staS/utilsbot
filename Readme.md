@@ -29,6 +29,10 @@ Handy utilities for your Discord server: merge PDFs and videos, capture web scre
 - URL shortener: quick is.gd links.
 - Network and HTTP pings with latency.
 - Dictionary, Translate, Weather, Timezone, Reminders, System stats, and more.
+ - Scheduled reminders and recurrent "habits".
+ - Password generator.
+ - Cryptographic helpers: Fernet encryption/decryption (user supplied key) + hashing (sha256/sha512/blake2/md5).
+ - Speedtest (speedtest-cli) and WHOIS lookup.
 
 ## Command reference
 - /help – list commands
@@ -41,12 +45,21 @@ Handy utilities for your Discord server: merge PDFs and videos, capture web scre
 - /qr url
 - /passw chars
 - /remind time message
+- /habit time message
+- /listhabit
+- /deletehabit message
 - /translate text target_language
 - /definition word [language]
 - /weather lugar
 - /timezone zona
 - /stats, /netdevices, /vpnstatus
 - /restart, /shutdown, /reboot, /update, /execute command
+- /whois domain
+- /speedtest
+- /encrypt message key
+- /decrypt message key
+- /hash message [algorithm]
+- /roll dices [sides]
 
 ## Quick start
 1) Create and activate a virtual environment
@@ -65,6 +78,7 @@ Copy .env.example to .env and set:
 	- DISCORD_TOKEN=your_discord_bot_token (required)
 	- NEXTCLOUD_DIR=your nextcloud dir (optional override)
 	- SERVICE_NAME=utilsbot.service (optional; used by /restart)
+	- (optional) Set a default FERNET_KEY if you want to avoid passing the key each time (not implemented by default; current /encrypt & /decrypt expect user supplied key argument)
 
 4) Run the bot
 - python bot.py
@@ -77,6 +91,7 @@ Copy .env.example to .env and set:
 Requirements
 - Python 3.10+
 - ffmpeg/ffprobe on PATH for /mergevid
+- speedtest-cli for /speedtest (installed via requirements.txt)
 
 ## Nextcloud integration
 - Base folder (configurable via NEXTCLOUD_DIR):
@@ -113,6 +128,8 @@ Then reload and start:
 - Bot token error: ensure DISCORD_TOKEN is set in .env and the process can read it.
 - dotenv issues: the bot looks for .env in both the working directory and alongside bot.py (supports .env/.ENV). It will still run without dotenv if the environment variable is set by the shell/service.
 - ffmpeg not found: install ffmpeg and ensure it’s on PATH; required for /mergevid.
+- Permission errors on /execute or system commands: ensure the bot process user has the needed sudo rights (or adjust commands).
+- Encryption errors: ensure the Fernet key is a 32-byte URL-safe base64 value (generate with: from cryptography.fernet import Fernet; Fernet.generate_key()).
 
 ## Contributing
 See CONTRIBUTING.md. Please open an issue first for major changes.

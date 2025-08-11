@@ -4,3 +4,5 @@ pypdf==5.0.1
 psutil==6.0.0
 pytz==2024.1
 aiohttp==3.9.5
+cryptography==39.0.1
+speedtest-cli==2.1.3
