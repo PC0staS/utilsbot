@@ -61,9 +61,9 @@ Handy utilities for your Discord server: merge PDFs and videos, capture web scre
 - pip install -r requirements.txt
 
 3) Configure environment
-- Copy .env.example to .env and set:
+Copy .env.example to .env and set:
 	- DISCORD_TOKEN=your_discord_bot_token (required)
-	- NEXTCLOUD_DIR=/mnt/ssd/nextcloud/pablo/files/Bot (optional override)
+	- NEXTCLOUD_DIR=your nextcloud dir (optional override)
 	- SERVICE_NAME=utilsbot.service (optional; used by /restart)
 
 4) Run the bot
@@ -80,7 +80,7 @@ Requirements
 
 ## Nextcloud integration
 - Base folder (configurable via NEXTCLOUD_DIR):
-	- /mnt/ssd/nextcloud/pablo/files/Bot
+	- your nextcloud dir
 - Subfolders are created automatically:
 	- Merged pdfs – combined PDFs
 	- Merged videos – concatenated videos
