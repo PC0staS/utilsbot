@@ -103,6 +103,7 @@ async def help(interaction: discord.Interaction):
         "- /vpnstatus: Muestra el estado de la VPN\n"
         "- /netdevices: Lista los dispositivos conectados a la red\n"
         "- /ping <ip_address>: Realiza un ping a una dirección IP\n"
+        "- /webping <url> [veces]: Comprueba una URL (HTTP) y mide latencia\n"
         "- /shorten <url>: Acorta una URL\n"
         "- /screenshotweb <url>: Toma una captura de pantalla de una página web\n"
         "- /qr <url>: Genera un código QR a partir de una URL\n"
@@ -204,6 +205,56 @@ async def shorten(interaction: discord.Interaction, url:str):
     await interaction.response.defer()
     result = await asyncio.to_thread(lambda: os.popen(f'curl -s "https://is.gd/create.php?format=simple&url={url}"').read())
     await interaction.followup.send(f"URL acortada:\n{result}")
+
+@bot.tree.command(name="webping", description="Comprueba una URL (HTTP) y mide latencia")
+@app_commands.describe(url="URL a comprobar (http/https)", veces="Número de intentos (1-5, por defecto 3)")
+async def webping(interaction: discord.Interaction, url: str, veces: Optional[int] = 3):
+    # Normaliza URL
+    if not url.startswith(("http://", "https://")):
+        url = "http://" + url
+
+    tries = 3 if not isinstance(veces, int) else max(1, min(5, veces))
+    await interaction.response.defer()
+
+    latencies: list[float] = []
+    statuses: list[int] = []
+    errors: list[str] = []
+
+    timeout = aiohttp.ClientTimeout(total=15)
+    headers = {"User-Agent": "utilsbot/1.0 (+https://discord)"}
+
+    async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+        for i in range(tries):
+            t0 = time.perf_counter()
+            try:
+                async with session.get(url, allow_redirects=True, ssl=False) as resp:
+                    _ = await resp.read()  # leer para medir bien
+                    dt = (time.perf_counter() - t0) * 1000.0
+                    latencies.append(dt)
+                    statuses.append(resp.status)
+            except Exception as e:
+                dt = (time.perf_counter() - t0) * 1000.0
+                latencies.append(dt)
+                errors.append(str(e))
+
+    ok = [s for s in statuses if 200 <= s < 400]
+    avg = sum(latencies) / len(latencies) if latencies else 0.0
+    best = min(latencies) if latencies else 0.0
+    worst = max(latencies) if latencies else 0.0
+
+    status_line = (
+        f"HTTP OK ({len(ok)}/{tries}) " + (f"Último: {statuses[-1]}" if statuses else ("Error" if errors else ""))
+    )
+    msg = (
+        f"Web ping a {url}:\n"
+        f"{status_line}\n"
+        f"Latencia ms -> media: {avg:.1f}, mejor: {best:.1f}, peor: {worst:.1f}"
+    )
+
+    if errors and len(errors) == tries:
+        msg += f"\nError: {errors[-1][:140]}"
+
+    await interaction.followup.send(msg)
 
 @bot.tree.command(name="screenshotweb", description="Toma una captura de pantalla de una página web")
 async def screenshotweb(interaction: discord.Interaction, url: str):
@@ -910,10 +961,11 @@ async def timezone(interaction: discord.Interaction, zona: str):
 async def restart(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
-        os.system("sudo systemctl restart utilsbot.service")
+        service = os.getenv("SERVICE_NAME", "utilsbot.service")
+        await asyncio.to_thread(os.system, f"sudo systemctl restart {service}")
+        await interaction.followup.send("Reiniciando el bot...", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"No pude reiniciar el bot: {e}", ephemeral=True)
-    await interaction.followup.send("Reiniciando el bot...", ephemeral=True)
 
 @bot.tree.command(name="execute", description="Ejecuta un comando en la Raspberry Pi")
 async def execute(interaction: discord.Interaction, command: str):
@@ -938,7 +990,31 @@ async def on_ready():
 
 
 if __name__ == "__main__":
-    token = Secret""
+    # Carga .env si python-dotenv está disponible
+    try:
+        import dotenv  # type: ignore
+        # Buscar .env en cwd y junto al script, y soportar .ENV (Linux es case-sensitive)
+        here = Path(__file__).parent
+        candidates = [
+            Path.cwd() / ".env",
+            Path.cwd() / ".ENV",
+            here / ".env",
+            here / ".ENV",
+        ]
+        loaded = False
+        for p in candidates:
+            try:
+                if p.exists():
+                    dotenv.load_dotenv(dotenv_path=str(p))
+                    loaded = True
+                    break
+            except Exception:
+                continue
+        if not loaded:
+            dotenv.load_dotenv()
+    except Exception:
+        pass
+    token = os.getenv("DISCORD_TOKEN")
     if not token:
         raise SystemExit("Falta la variable de entorno DISCORD_TOKEN.")
     bot.run(token)
