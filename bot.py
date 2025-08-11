@@ -2,11 +2,11 @@ import os
 import random
 import string
 from urllib import response
-import aiohttp
-import discord
-from discord.ext import commands
-from discord import app_commands
-import psutil
+import aiohttp  # type: ignore
+import discord  # type: ignore
+from discord.ext import commands  # type: ignore
+from discord import app_commands  # type: ignore
+import psutil  # type: ignore
 import asyncio
 import io
 import subprocess
@@ -19,13 +19,13 @@ import urllib.parse
 from urllib.parse import urlparse
 from typing import Optional
 import html
-import pytz
+import pytz  # type: ignore
 import time
 import platform
 import shutil
 import urllib.request
 import hashlib
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet  # type: ignore
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -1109,17 +1109,14 @@ async def roll(interaction: discord.Interaction, dices: int, sides: int = 6):
     await interaction.followup.send(f"Resultados de la tirada de {dices} dados de {sides} caras: {results}")
 
 @bot.tree.command(name="encrypt", description="Encripta un mensaje")
-async def encrypt(interaction: discord.Interaction, message: str, key:str):
+async def encrypt(interaction: discord.Interaction, message: str, key: str):
     await interaction.response.defer()
     try:
         norm_key = _normalize_fernet_key(key)
         fernet = Fernet(norm_key)
         encrypted = fernet.encrypt(message.encode()).decode()
-        # Mostrar también la key derivada si el usuario pasó una passphrase para que pueda reutilizarla
-        if norm_key.decode() != key:
-            await interaction.followup.send(f"Mensaje encriptado (key derivada de passphrase):\n```\n{encrypted}\n```\nClave derivada (guárdala para desencriptar):\n```\n{norm_key.decode()}\n```")
-        else:
-            await interaction.followup.send(f"Mensaje encriptado:\n```\n{encrypted}\n```")
+        # Simplificado: siempre mostramos solo el texto encriptado; la misma passphrase sirve para desencriptar.
+        await interaction.followup.send(f"Mensaje encriptado:\n```\n{encrypted}\n```")
     except Exception as e:
         await interaction.followup.send(f"No pude encriptar el mensaje: {e}", ephemeral=True)
 
