@@ -32,21 +32,28 @@ Handy utilities for your Discord server: merge PDFs and videos, capture web scre
 
 ## Command reference
 - /help – list commands
-- /mergepdf file1 [file2..file5]
-- /mergevid file1 [file2..file5]
-- /screenshotweb url
-- /shorten url
-- /ping ip_address
-- /webping url [veces]
-- /qr url
-- /passw chars
-- /remind time message
-- /translate text target_language
-- /definition word [language]
-- /weather lugar
-- /timezone zona
-- /stats, /netdevices, /vpnstatus
-- /restart, /shutdown, /reboot, /update, /execute command
+- /ejemplo – greet user
+- /stats – system statistics
+- /mergepdf file1 [file2..file5] – combine PDFs
+- /mergevid file1 [file2..file5] – concatenate videos to MP4
+- /screenshotweb url – capture webpage screenshot
+- /shorten url – create short is.gd links
+- /ping ip_address – ping IP address
+- /webping url [veces] – HTTP ping with latency
+- /qr url – generate QR code
+- /passw chars – generate password
+- /remind time message – create reminder (minutes)
+- /translate text target_language – translate text
+- /definition word [language] – word definition lookup
+- /weather lugar – current weather
+- /timezone zona – time in timezone
+- /netdevices – list network devices
+- /vpnstatus – VPN status
+- /restart – restart bot
+- /reboot – restart Raspberry Pi
+- /shutdown – shutdown Raspberry Pi
+- /update – system update
+- /execute command – run system command
 
 ## Quick start
 1) Create and activate a virtual environment

@@ -96,26 +96,26 @@ async def help(interaction: discord.Interaction):
         "Comandos disponibles:\n"
         "- /help: Muestra la lista de comandos\n"
         "- /ejemplo: Te saluda\n"
-        "- /stats: Muestra estadísticas\n"
-        "- /reboot: Reinicia la Raspberry Pi\n"
-        "- /shutdown: Apaga la Raspberry Pi\n"
-        "- /update: Actualiza el sistema\n"
-        "- /vpnstatus: Muestra el estado de la VPN\n"
-        "- /netdevices: Lista los dispositivos conectados a la red\n"
-        "- /ping <ip_address>: Realiza un ping a una dirección IP\n"
-        "- /webping <url> [veces]: Comprueba una URL (HTTP) y mide latencia\n"
-        "- /shorten <url>: Acorta una URL\n"
-        "- /screenshotweb <url>: Toma una captura de pantalla de una página web\n"
-        "- /qr <url>: Genera un código QR a partir de una URL\n"
-        "- /passw <chars>: Genera una contraseña\n"
+        "- /stats: Muestra estadísticas del sistema\n"
         "- /mergepdf <file1> [file2..file5]: Junta varios PDF adjuntos en uno solo\n"
         "- /mergevid <file1> [file2..file5]: Une varios vídeos en uno solo (MP4)\n"
-        "- /remind <time> <message>: Crea un recordatorio (minutos)\n"
+        "- /screenshotweb <url>: Toma una captura de pantalla de una página web\n"
+        "- /shorten <url>: Acorta una URL\n"
+        "- /ping <ip_address>: Realiza un ping a una dirección IP\n"
+        "- /webping <url> [veces]: Comprueba una URL (HTTP) y mide latencia\n"
+        "- /qr <url>: Genera un código QR a partir de una URL\n"
+        "- /passw <chars>: Genera una contraseña\n"
+        "- /remind <time> <message>: Crea un recordatorio (tiempo en minutos)\n"
         "- /translate <text> <target_language>: Traduce un texto a otro idioma\n"
         "- /definition <word> [language]: Busca la definición de una palabra\n"
         "- /weather <lugar>: Muestra el tiempo actual de una ciudad\n"
         "- /timezone <zona>: Consulta la hora en otra zona horaria\n"
+        "- /netdevices: Lista los dispositivos conectados a la red\n"
+        "- /vpnstatus: Muestra el estado de la VPN\n"
         "- /restart: Reinicia el bot\n"
+        "- /reboot: Reinicia la Raspberry Pi\n"
+        "- /shutdown: Apaga la Raspberry Pi\n"
+        "- /update: Actualiza el sistema\n"
         "- /execute <command>: Ejecuta un comando en la Raspberry Pi"
     )
     await interaction.response.send_message(list)
@@ -957,7 +957,7 @@ async def timezone(interaction: discord.Interaction, zona: str):
     except Exception as e:
         await interaction.followup.send(f"No pude obtener la hora: {e}", ephemeral=True)
 
-@bot.tree.command(name="restart", description="Reincia el bot")
+@bot.tree.command(name="restart", description="Reinicia el bot")
 async def restart(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
