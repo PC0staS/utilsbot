@@ -16,11 +16,13 @@ from pathlib import Path
 import base64
 import json
 import urllib.parse
+from urllib.parse import urlparse
 from typing import Optional
 import html
 import pytz
 import time
 import platform
+import shutil
 
 import urllib.request
 
@@ -28,6 +30,65 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# —— Salida a Nextcloud ——
+def _get_base_nextcloud_dir() -> Path:
+    # 1) Permitir override por variable de entorno
+    env = os.getenv("NEXTCLOUD_DIR") or os.getenv("NEXTCLOUD_PATH")
+    if env:
+        return Path(env)
+    # 2) Ruta proporcionada por el usuario como candidata
+    provided = Path("/mnt/ssd/nextcloud/pablo/files/Bot")
+    candidates = [provided]
+    # 3) Heurísticas comunes (Windows/Linux)
+    candidates += [
+        Path.home() / "Nextcloud",
+        Path.home() / "NextCloud",
+        Path.home() / "OneDrive" / "Documentos" / "NextCloud",
+        Path.home() / "Documents" / "Nextcloud",
+    ]
+    for c in candidates:
+        try:
+            if c.exists():
+                return c
+        except Exception:
+            continue
+    return Path.cwd()
+
+def get_output_dir(kind: str | None = None) -> Path:
+    """Obtiene/crea el directorio de salida.
+    kind: 'screenshots' | 'pdfs' | 'videos' para subcarpetas específicas.
+    """
+    base = _get_base_nextcloud_dir()
+    name_map = {
+        "screenshots": "Screenshots",
+        "pdfs": "Merged pdfs",
+        "videos": "Merged videos",
+    }
+    target = base
+    if kind:
+        target = base / name_map.get(kind, kind)
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        # Si no se puede crear ahí, usar cwd como fallback
+        fallback = Path.cwd() / (name_map.get(kind, kind or "output") if kind else "output")
+        fallback.mkdir(parents=True, exist_ok=True)
+        target = fallback
+    return target
+
+def unique_path(directory: Path, filename: str) -> Path:
+    p = directory / filename
+    if not p.exists():
+        return p
+    stem = p.stem
+    suffix = p.suffix
+    for i in range(1, 1000):
+        candidate = directory / f"{stem}-{i:03d}{suffix}"
+        if not candidate.exists():
+            return candidate
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return directory / f"{stem}-{ts}{suffix}"
 
 @bot.tree.command(name="help", description="Muestra la lista de comandos")
 async def help(interaction: discord.Interaction):
@@ -159,10 +220,22 @@ async def screenshotweb(interaction: discord.Interaction, url: str):
         image_bytes = await asyncio.to_thread(
             lambda: urllib.request.urlopen(screenshot_url, timeout=20).read()
         )
-        file = discord.File(fp=io.BytesIO(image_bytes), filename="screenshot.png")
-        await interaction.followup.send(content=f"Captura de pantalla de {url}:", file=file)
     except Exception as e:
         await interaction.followup.send(f"No se pudo obtener la captura: {e}")
+        return
+
+    # Guardar en Nextcloud con nombre único
+    out_dir = get_output_dir("screenshots")
+    parsed = urlparse(url)
+    host = parsed.netloc or "screenshot"
+    target = unique_path(out_dir, f"{host}.png")
+    try:
+        target.write_bytes(image_bytes)
+    except Exception:
+        pass
+
+    file = discord.File(fp=io.BytesIO(image_bytes), filename=target.name)
+    await interaction.followup.send(content=f"Captura de pantalla de {url}:", file=file)
 
 
 @bot.tree.command(name="qr", description="Genera un código QR a partir de una URL")
@@ -256,8 +329,15 @@ async def mergepdf(
         await interaction.followup.send(f"No se pudieron combinar los PDFs: {e}", ephemeral=True)
         return
 
-    merged_name = "merged.pdf"
     data = buf.getvalue()
+    # Guardar en Nextcloud con nombre único
+    out_dir = get_output_dir("pdfs")
+    merged_path = unique_path(out_dir, "merged.pdf")
+    try:
+        merged_path.write_bytes(data)
+    except Exception:
+        pass
+    merged_name = merged_path.name
     LIMIT = 24 * 1024 * 1024  # ~24 MiB seguro para adjuntar
 
     if len(data) <= LIMIT:
@@ -268,7 +348,7 @@ async def mergepdf(
         return
     else:
         await interaction.followup.send(
-            "El PDF combinado excede el límite para adjuntar",
+            f"El PDF combinado excede el límite para adjuntar. Se guardó como '{merged_name}'.",
             ephemeral=True,
         )
 
@@ -437,16 +517,26 @@ async def mergevid(
 
             # Enviar resultado si no excede el límite
             out_bytes = out_path.read_bytes()
+            # Guardar en Nextcloud con nombre único
+            out_dir = get_output_dir("videos")
+            final_path = unique_path(out_dir, "merged.mp4")
+            try:
+                shutil.copy2(out_path, final_path)
+            except Exception:
+                try:
+                    final_path.write_bytes(out_bytes)
+                except Exception:
+                    pass
             if len(out_bytes) > LIMIT:
                 await interaction.followup.send(
-                    "El vídeo resultante excede el límite de adjuntos del bot.",
+                    f"El vídeo resultante excede el límite de adjuntos del bot. Se guardó como '{final_path.name}'.",
                     ephemeral=True,
                 )
                 return
 
             await interaction.followup.send(
                 content="Aquí tienes tu vídeo unido:",
-                file=discord.File(fp=io.BytesIO(out_bytes), filename="merged.mp4"),
+                file=discord.File(fp=io.BytesIO(out_bytes), filename=final_path.name),
             )
             return
     except Exception as e:
