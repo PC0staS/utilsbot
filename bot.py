@@ -47,6 +47,7 @@ async def help(interaction: discord.Interaction):
         "- /qr <url>: Genera un código QR a partir de una URL\n"
         "- /passw <chars>: Genera una contraseña\n"
         "- /mergepdf <file1> [file2..file5]: Junta varios PDF adjuntos en uno solo\n"
+        "- /mergevid <file1> [file2..file5]: Une varios vídeos en uno solo (MP4)\n"
         "- /remind <time> <message>: Crea un recordatorio (minutos)\n"
         "- /translate <text> <target_language>: Traduce un texto a otro idioma\n"
         "- /definition <word> [language]: Busca la definición de una palabra\n"
@@ -270,6 +271,190 @@ async def mergepdf(
             "El PDF combinado excede el límite para adjuntar",
             ephemeral=True,
         )
+
+
+@bot.tree.command(name="mergevid", description="Une dos videos en uno")
+@app_commands.describe(
+    file1="Vídeo 1 (obligatorio)",
+    file2="Vídeo 2 (opcional)",
+    file3="Vídeo 3 (opcional)",
+    file4="Vídeo 4 (opcional)",
+    file5="Vídeo 5 (opcional)",
+)
+async def mergevid(
+    interaction: discord.Interaction,
+    file1: discord.Attachment,
+    file2: Optional[discord.Attachment] = None,
+    file3: Optional[discord.Attachment] = None,
+    file4: Optional[discord.Attachment] = None,
+    file5: Optional[discord.Attachment] = None,
+):
+    """Concatena 2-5 vídeos en un MP4. Intenta primero "stream copy" y, si falla, re-codifica."""
+    await interaction.response.defer()
+
+    attachments = [f for f in [file1, file2, file3, file4, file5] if f is not None]
+    if len(attachments) < 2:
+        await interaction.followup.send("Adjunta al menos 2 vídeos.", ephemeral=True)
+        return
+
+    # Validación básica de tipo
+    video_exts = (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".ts")
+    for a in attachments:
+        name = (a.filename or "").lower()
+        ctype = (a.content_type or "").lower()
+        if not (name.endswith(video_exts) or ctype.startswith("video/")):
+            await interaction.followup.send(
+                f"'{a.filename}' no parece ser un vídeo.", ephemeral=True
+            )
+            return
+
+    # Comprobar ffmpeg disponible
+    async def _check_ffmpeg() -> bool:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-version",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+            return proc.returncode == 0
+        except Exception:
+            return False
+
+    if not await _check_ffmpeg():
+        await interaction.followup.send(
+            "ffmpeg no está disponible en el sistema. Instálalo para usar /mergevid.",
+            ephemeral=True,
+        )
+        return
+
+    LIMIT = 24 * 1024 * 1024  # ~24 MiB seguro para adjuntar
+
+    # Flujo principal: descargar a temp, intentar concat demuxer (-c copy), si falla re-codificar.
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            local_files: list[Path] = []
+
+            # Descargar adjuntos a ficheros temporales
+            for idx, att in enumerate(attachments):
+                data = await att.read()
+                suffix = Path(att.filename or f"vid{idx}.mp4").suffix or ".mp4"
+                p = td_path / f"in_{idx:02d}{suffix}"
+                p.write_bytes(data)
+                local_files.append(p)
+
+            out_path = td_path / "merged.mp4"
+
+            # 1) Intento rápido: demuxer concat con copia de streams
+            list_file = td_path / "inputs.txt"
+
+            def _quote_for_concat(path: Path) -> str:
+                s = str(path)
+                # Escapar comillas simples según concat demuxer
+                s = s.replace("'", "'\\''")
+                return f"file '{s}'"
+
+            list_file.write_text("\n".join(_quote_for_concat(p) for p in local_files), encoding="utf-8")
+
+            proc1 = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "concat", "-safe", "0",
+                "-i", str(list_file),
+                "-c", "copy",
+                str(out_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, err1 = await proc1.communicate()
+
+            if proc1.returncode != 0 or not out_path.exists():
+                # 2) Fallback: re-codificar con concat filter
+                # Detectar si todos tienen audio
+                async def _has_audio(p: Path) -> bool:
+                    try:
+                        proc = await asyncio.create_subprocess_exec(
+                            "ffprobe", "-v", "error",
+                            "-select_streams", "a:0",
+                            "-show_entries", "stream=codec_type",
+                            "-of", "csv=p=0",
+                            str(p),
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                        )
+                        out, _ = await proc.communicate()
+                        return proc.returncode == 0 and (out.decode().strip() != "")
+                    except Exception:
+                        return False
+
+                audio_flags = await asyncio.gather(*(_has_audio(p) for p in local_files))
+                all_have_audio = all(audio_flags)
+
+                # Construir comando ffmpeg con entradas
+                args = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+                for p in local_files:
+                    args += ["-i", str(p)]
+
+                n = len(local_files)
+                if all_have_audio and n > 0:
+                    v_in = "".join(f"[{i}:v:0]" for i in range(n))
+                    a_in = "".join(f"[{i}:a:0]" for i in range(n))
+                    filter_str = f"{v_in}{a_in}concat=n={n}:v=1:a=1[v][a]"
+                    args += [
+                        "-filter_complex", filter_str,
+                        "-map", "[v]", "-map", "[a]",
+                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                        "-c:a", "aac", "-b:a", "128k",
+                        str(out_path),
+                    ]
+                else:
+                    # Sin audio (o mezcla dispar). Concatenamos solo vídeo y silenciamos audio.
+                    v_in = "".join(f"[{i}:v:0]" for i in range(n))
+                    filter_str = f"{v_in}concat=n={n}:v=1:a=0[v]"
+                    args += [
+                        "-filter_complex", filter_str,
+                        "-map", "[v]",
+                        "-an",
+                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                        str(out_path),
+                    ]
+
+                proc2 = await asyncio.create_subprocess_exec(
+                    *args,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, err2 = await proc2.communicate()
+                if proc2.returncode != 0 or not out_path.exists():
+                    # Falla definitiva
+                    tail = (err2 or err1 or b"").decode(errors="ignore")
+                    tail = tail[-600:]
+                    await interaction.followup.send(
+                        "No se pudo unir los vídeos. Detalle técnico:\n" + tail,
+                        ephemeral=True,
+                    )
+                    return
+
+            # Enviar resultado si no excede el límite
+            out_bytes = out_path.read_bytes()
+            if len(out_bytes) > LIMIT:
+                await interaction.followup.send(
+                    "El vídeo resultante excede el límite de adjuntos del bot.",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.followup.send(
+                content="Aquí tienes tu vídeo unido:",
+                file=discord.File(fp=io.BytesIO(out_bytes), filename="merged.mp4"),
+            )
+            return
+    except Exception as e:
+        await interaction.followup.send(f"Ocurrió un error al unir los vídeos: {e}", ephemeral=True)
+        return
+
+
+
 
 @bot.tree.command(name="remind", description="Crea un recordatorio")
 @app_commands.describe(
