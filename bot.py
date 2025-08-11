@@ -32,7 +32,27 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-habitslist = []
+habitslist = []  # (LEGACY) ya no se usa para ejecutar loops; mantenido para compatibilidad con código existente
+# Nuevo sistema de habits: cada habit es una tarea asíncrona cancelable.
+# Clave: usamos el mensaje como identificador (puedes cambiarlo a un UUID si quieres mensajes repetidos).
+habit_tasks: dict[str, dict] = {}
+
+def _derive_fernet_key(passphrase: str) -> bytes:
+    """Deriva una clave Fernet válida (base64 urlsafe 32 bytes) desde cualquier passphrase.
+    Esto permite al usuario usar 'cualquier palabra'. (SHA-256 -> 32 bytes -> base64)"""
+    h = hashlib.sha256(passphrase.encode()).digest()  # 32 bytes
+    return base64.urlsafe_b64encode(h)
+
+def _normalize_fernet_key(key: str) -> bytes:
+    """Acepta tanto una key Fernet ya codificada (44 chars aprox) como una passphrase libre."""
+    raw = key.strip()
+    # Intentar usarla directamente
+    try:
+        Fernet(raw)
+        return raw.encode()
+    except Exception:
+        # Derivar de passphrase
+        return _derive_fernet_key(raw)
 
 # —— Salida a Nextcloud ——
 def _get_base_nextcloud_dir() -> Path:
@@ -99,27 +119,36 @@ async def help(interaction: discord.Interaction):
         "Comandos disponibles:\n"
         "- /help: Muestra la lista de comandos\n"
         "- /ejemplo: Te saluda\n"
-        "- /stats: Muestra estadísticas\n"
+        "- /stats: Muestra estadísticas del sistema\n"
         "- /reboot: Reinicia la Raspberry Pi\n"
         "- /shutdown: Apaga la Raspberry Pi\n"
-        "- /update: Actualiza el sistema\n"
-        "- /vpnstatus: Muestra el estado de la VPN\n"
+        "- /update: Actualiza el sistema (apt)\n"
+        "- /vpnstatus: Muestra el estado de la VPN WireGuard\n"
         "- /netdevices: Lista los dispositivos conectados a la red\n"
-        "- /ping <ip_address>: Realiza un ping a una dirección IP\n"
-        "- /webping <url> [veces]: Comprueba una URL (HTTP) y mide latencia\n"
+        "- /ping <ip>: Realiza un ping (4 intentos)\n"
+        "- /webping <url> [veces]: Comprueba URL HTTP y latencia\n"
+        "- /whois <dominio>: Información WHOIS del dominio\n"
+        "- /speedtest: Test de velocidad (simple)\n"
         "- /shorten <url>: Acorta una URL\n"
-        "- /screenshotweb <url>: Toma una captura de pantalla de una página web\n"
-        "- /qr <url>: Genera un código QR a partir de una URL\n"
-        "- /passw <chars>: Genera una contraseña\n"
-        "- /mergepdf <file1> [file2..file5]: Junta varios PDF adjuntos en uno solo\n"
-        "- /mergevid <file1> [file2..file5]: Une varios vídeos en uno solo (MP4)\n"
-        "- /remind <time> <message>: Crea un recordatorio (minutos)\n"
-        "- /translate <text> <target_language>: Traduce un texto a otro idioma\n"
-        "- /definition <word> [language]: Busca la definición de una palabra\n"
-        "- /weather <lugar>: Muestra el tiempo actual de una ciudad\n"
-        "- /timezone <zona>: Consulta la hora en otra zona horaria\n"
-        "- /restart: Reinicia el bot\n"
-        "- /execute <command>: Ejecuta un comando en la Raspberry Pi"
+        "- /screenshotweb <url>: Captura de una página web\n"
+        "- /qr <url>: Genera un código QR\n"
+        "- /passw <chars>: Genera una contraseña aleatoria\n"
+        "- /mergepdf <file1..file5>: Junta varios PDF\n"
+        "- /mergevid <file1..file5>: Une varios vídeos en MP4\n"
+        "- /remind <min> <mensaje>: Recordatorio único\n"
+        "- /habit <min> <mensaje>: Recordatorio recurrente (cancelable)\n"
+        "- /listhabit: Lista habits activos\n"
+        "- /deletehabit <mensaje>: Elimina un habit\n"
+        "- /translate <texto> <idioma>: Traduce texto\n"
+        "- /definition <palabra> [idioma]: Definición de una palabra\n"
+        "- /weather <lugar>: Tiempo actual de una ciudad\n"
+        "- /timezone <zona>: Hora en una zona horaria\n"
+        "- /roll <dados> [caras]: Tirar dados\n"
+        "- /encrypt <mensaje> <key|passphrase>: Encripta (Fernet; passphrase aceptada)\n"
+        "- /decrypt <texto> <key|passphrase>: Desencripta\n"
+        "- /hash <mensaje> [alg]: Hash (sha256/sha512/blake2b/blake2s/md5)\n"
+        "- /restart: Reinicia el bot (systemd)\n"
+        "- /execute <command>: Ejecuta un comando en el host"
     )
     await interaction.response.send_message(list)
 
@@ -650,26 +679,47 @@ async def habit(
     if time < 1:
         await interaction.followup.send("El tiempo debe ser al menos 1 minuto.", ephemeral=True)
         return
+    # Si ya existe un habit con el mismo mensaje, lo reemplazamos
+    if message in habit_tasks:
+        # Cancelar el anterior
+        old_task = habit_tasks[message]["task"]
+        old_task.cancel()
+        await interaction.followup.send(f"Habit existente actualizado: cada {time} minutos -> {message}")
+    else:
+        await interaction.followup.send(f"Habit creado: cada {time} minutos -> {message}")
 
-    await interaction.followup.send(f"Recordatorio recurrente configurado cada {time} minutos.")
+    interval_minutes = time
 
-    habitslist.append((time, message))
-    
-    for time, message in habitslist:
-        while True:
-            await asyncio.sleep(time * 60)
-            await interaction.followup.send(f"¡Recordatorio! {message}")
+    async def _habit_loop(msg: str, interval: int):
+        try:
+            # Espera inicial antes del primer recordatorio (opcional). Si quieres enviar uno inmediato, quita la primera sleep.
+            while True:
+                await asyncio.sleep(interval * 60)
+                try:
+                    await interaction.followup.send(f"¡Recordatorio! {msg}")
+                except Exception:
+                    pass
+        except asyncio.CancelledError:
+            # Limpieza al cancelar
+            pass
+        finally:
+            # Eliminar de registro si sigue apuntando a esta tarea
+            current = habit_tasks.get(msg)
+            if current and current.get("task") == asyncio.current_task():
+                habit_tasks.pop(msg, None)
+
+    task = asyncio.create_task(_habit_loop(message, interval_minutes))
+    habit_tasks[message] = {"interval": interval_minutes, "task": task}
 
 
 @bot.tree.command(name="listhabit", description="Lista habits")
 async def listhabit(interaction: discord.Interaction):
     await interaction.response.defer()
 
-    if not habitslist:
+    if not habit_tasks:
         await interaction.followup.send("No hay habits configurados.")
         return
-
-    habit_messages = [f"- Cada {time} minutos: {message}" for time, message in habitslist]
+    habit_messages = [f"- Cada {data['interval']} minutos: {msg}" for msg, data in habit_tasks.items()]
     await interaction.followup.send("Lista de habits:\n" + "\n".join(habit_messages))
 
 @bot.tree.command(name="deletehabit", description="Elimina un habit")
@@ -681,14 +731,15 @@ async def deletehabit(
     message: str
 ):
     await interaction.response.defer()
-
-    for i, (time, msg) in enumerate(habitslist):
-        if msg == message:
-            habitslist.pop(i)
-            await interaction.followup.send(f"Habit eliminado: Cada {time} minutos: {msg}")
-            return
-
-    await interaction.followup.send("Habit no encontrado.", ephemeral=True)
+    data = habit_tasks.get(message)
+    if not data:
+        await interaction.followup.send("Habit no encontrado.", ephemeral=True)
+        return
+    task: asyncio.Task = data["task"]
+    task.cancel()
+    # Eliminación la maneja el finally del loop, pero limpiamos por si acaso
+    habit_tasks.pop(message, None)
+    await interaction.followup.send(f"Habit eliminado: {message}")
     return
 
 
@@ -1061,9 +1112,14 @@ async def roll(interaction: discord.Interaction, dices: int, sides: int = 6):
 async def encrypt(interaction: discord.Interaction, message: str, key:str):
     await interaction.response.defer()
     try:
-        fernet = Fernet(key)
+        norm_key = _normalize_fernet_key(key)
+        fernet = Fernet(norm_key)
         encrypted = fernet.encrypt(message.encode()).decode()
-        await interaction.followup.send(f"Mensaje encriptado:\n```\n{encrypted}\n```")
+        # Mostrar también la key derivada si el usuario pasó una passphrase para que pueda reutilizarla
+        if norm_key.decode() != key:
+            await interaction.followup.send(f"Mensaje encriptado (key derivada de passphrase):\n```\n{encrypted}\n```\nClave derivada (guárdala para desencriptar):\n```\n{norm_key.decode()}\n```")
+        else:
+            await interaction.followup.send(f"Mensaje encriptado:\n```\n{encrypted}\n```")
     except Exception as e:
         await interaction.followup.send(f"No pude encriptar el mensaje: {e}", ephemeral=True)
 
@@ -1072,7 +1128,8 @@ async def encrypt(interaction: discord.Interaction, message: str, key:str):
 async def decrypt(interaction: discord.Interaction, message: str, key: str):
     await interaction.response.defer()
     try:
-        fernet = Fernet(key)
+        norm_key = _normalize_fernet_key(key)
+        fernet = Fernet(norm_key)
         decrypted = fernet.decrypt(message.encode()).decode()
         await interaction.followup.send(f"Mensaje desencriptado:\n```\n{decrypted}\n```")
     except Exception as e:
