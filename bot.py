@@ -154,7 +154,7 @@ async def help(interaction: discord.Interaction):
 
 @bot.tree.command(name="ejemplo", description="Te saluda")
 async def ejemplo(interaction: discord.Interaction):
-    await interaction.response.send_message(f"Hola, {interaction.user.mention}!")
+    await interaction.response.send_message(f"¡Hola, {interaction.user.mention}!")
 
 
 @bot.tree.command(name="stats",description="Muestra estadísticas")
