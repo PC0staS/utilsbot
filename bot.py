@@ -100,6 +100,7 @@ def get_output_dir(kind: str | None = None) -> Path:
         target = fallback
     return target
 
+
 def unique_path(directory: Path, filename: str) -> Path:
     p = directory / filename
     if not p.exists():
