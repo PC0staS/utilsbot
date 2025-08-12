@@ -32,42 +32,42 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-habitslist = []  # (LEGACY) ya no se usa para ejecutar loops; mantenido para compatibilidad con código existente
-# Nuevo sistema de habits: cada habit es una tarea asíncrona cancelable.
-# Clave: usamos el mensaje como identificador (puedes cambiarlo a un UUID si quieres mensajes repetidos).
+habitslist = []  # (LEGACY) no longer used for executing loops; maintained for compatibility with existing code
+# New habits system: each habit is a cancelable asynchronous task.
+# Key: we use the message as identifier (you can change it to a UUID if you want repeated messages).
 habit_tasks: dict[str, dict] = {}
 
 def _derive_fernet_key(passphrase: str) -> bytes:
-    """Deriva una clave Fernet válida (base64 urlsafe 32 bytes) desde cualquier passphrase.
-    Esto permite al usuario usar 'cualquier palabra'. (SHA-256 -> 32 bytes -> base64)"""
+    """Derives a valid Fernet key (base64 urlsafe 32 bytes) from any passphrase.
+    This allows the user to use 'any word'. (SHA-256 -> 32 bytes -> base64)"""
     h = hashlib.sha256(passphrase.encode()).digest()  # 32 bytes
     return base64.urlsafe_b64encode(h)
 
 def _normalize_fernet_key(key: str) -> bytes:
-    """Acepta tanto una key Fernet ya codificada (44 chars aprox) como una passphrase libre."""
+    """Accepts both an already encoded Fernet key (44 chars approx) and a free passphrase."""
     raw = key.strip()
-    # Intentar usarla directamente
+    # Try to use it directly
     try:
         Fernet(raw)
         return raw.encode()
     except Exception:
-        # Derivar de passphrase
+        # Derive from passphrase
         return _derive_fernet_key(raw)
 
-# —— Salida a Nextcloud ——
+# —— Nextcloud Output ——
 def _get_base_nextcloud_dir() -> Path:
-    # 1) Permitir override por variable de entorno
+    # 1) Allow override by environment variable
     env = os.getenv("NEXTCLOUD_DIR") or os.getenv("NEXTCLOUD_PATH")
     if env:
         return Path(env)
-    # 2) Ruta proporcionada por el usuario como candidata
+    # 2) Path provided by user as candidate
     provided = Path("/mnt/ssd/nextcloud/pablo/files/Bot")
     candidates = [provided]
-    # 3) Heurísticas comunes (Windows/Linux)
+    # 3) Common heuristics (Windows/Linux)
     candidates += [
         Path.home() / "Nextcloud",
         Path.home() / "NextCloud",
-        Path.home() / "OneDrive" / "Documentos" / "NextCloud",
+        Path.home() / "OneDrive" / "Documents" / "NextCloud",
         Path.home() / "Documents" / "Nextcloud",
     ]
     for c in candidates:
@@ -79,8 +79,8 @@ def _get_base_nextcloud_dir() -> Path:
     return Path.cwd()
 
 def get_output_dir(kind: str | None = None) -> Path:
-    """Obtiene/crea el directorio de salida.
-    kind: 'screenshots' | 'pdfs' | 'videos' para subcarpetas específicas.
+    """Gets/creates the output directory.
+    kind: 'screenshots' | 'pdfs' | 'videos' for specific subfolders.
     """
     base = _get_base_nextcloud_dir()
     name_map = {
@@ -94,7 +94,7 @@ def get_output_dir(kind: str | None = None) -> Path:
     try:
         target.mkdir(parents=True, exist_ok=True)
     except Exception:
-        # Si no se puede crear ahí, usar cwd como fallback
+        # If we can't create there, use cwd as fallback
         fallback = Path.cwd() / (name_map.get(kind, kind or "output") if kind else "output")
         fallback.mkdir(parents=True, exist_ok=True)
         target = fallback
@@ -113,57 +113,57 @@ def unique_path(directory: Path, filename: str) -> Path:
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     return directory / f"{stem}-{ts}{suffix}"
 
-@bot.tree.command(name="help", description="Muestra la lista de comandos")
+@bot.tree.command(name="help", description="Shows the list of commands")
 async def help(interaction: discord.Interaction):
     list = (
-        "Comandos disponibles:\n"
-        "- /help: Muestra la lista de comandos\n"
-        "- /ejemplo: Te saluda\n"
-        "- /stats: Muestra estadísticas del sistema\n"
-        "- /reboot: Reinicia la Raspberry Pi\n"
-        "- /shutdown: Apaga la Raspberry Pi\n"
-        "- /update: Actualiza el sistema (apt)\n"
-        "- /vpnstatus: Muestra el estado de la VPN WireGuard\n"
-        "- /netdevices: Lista los dispositivos conectados a la red\n"
-        "- /ping <ip>: Realiza un ping (4 intentos)\n"
-        "- /webping <url> [veces]: Comprueba URL HTTP y latencia\n"
-        "- /whois <dominio>: Información WHOIS del dominio\n"
-        "- /speedtest: Test de velocidad (simple)\n"
-        "- /shorten <url>: Acorta una URL\n"
-        "- /screenshotweb <url>: Captura de una página web\n"
-        "- /qr <url>: Genera un código QR\n"
-        "- /passw <chars>: Genera una contraseña aleatoria\n"
-        "- /mergepdf <file1..file5>: Junta varios PDF\n"
-        "- /mergevid <file1..file5>: Une varios vídeos en MP4\n"
-        "- /remind <min> <mensaje>: Recordatorio único\n"
-        "- /habit <min> <mensaje>: Recordatorio recurrente (cancelable)\n"
-        "- /listhabit: Lista habits activos\n"
-        "- /deletehabit <mensaje>: Elimina un habit\n"
-        "- /translate <texto> <idioma>: Traduce texto\n"
-        "- /definition <palabra> [idioma]: Definición de una palabra\n"
-        "- /weather <lugar>: Tiempo actual de una ciudad\n"
-        "- /timezone <zona>: Hora en una zona horaria\n"
-        "- /roll <dados> [caras]: Tirar dados\n"
-        "- /encrypt <mensaje> <key|passphrase>: Encripta (Fernet; passphrase aceptada)\n"
-        "- /decrypt <texto> <key|passphrase>: Desencripta\n"
-        "- /hash <mensaje> [alg]: Hash (sha256/sha512/blake2b/blake2s/md5)\n"
-        "- /restart: Reinicia el bot (systemd)\n"
-        "- /execute <command>: Ejecuta un comando en el host"
+        "Available commands:\n"
+        "- /help: Shows the list of commands\n"
+        "- /example: Greets you\n"
+        "- /stats: Shows system statistics\n"
+        "- /reboot: Restarts the Raspberry Pi\n"
+        "- /shutdown: Shuts down the Raspberry Pi\n"
+        "- /update: Updates the system (apt)\n"
+        "- /vpnstatus: Shows WireGuard VPN status\n"
+        "- /netdevices: Lists devices connected to the network\n"
+        "- /ping <ip>: Performs a ping (4 attempts)\n"
+        "- /webping <url> [times]: Checks HTTP URL and latency\n"
+        "- /whois <domain>: WHOIS information for domain\n"
+        "- /speedtest: Speed test (simple)\n"
+        "- /shorten <url>: Shortens a URL\n"
+        "- /screenshotweb <url>: Web page screenshot\n"
+        "- /qr <url>: Generates a QR code\n"
+        "- /passw <chars>: Generates a random password\n"
+        "- /mergepdf <file1..file5>: Merges multiple PDFs\n"
+        "- /mergevid <file1..file5>: Merges multiple videos into MP4\n"
+        "- /remind <min> <message>: Single reminder\n"
+        "- /habit <min> <message>: Recurring reminder (cancelable)\n"
+        "- /listhabit: Lists active habits\n"
+        "- /deletehabit <message>: Deletes a habit\n"
+        "- /translate <text> <language>: Translates text\n"
+        "- /definition <word> [language]: Definition of a word\n"
+        "- /weather <place>: Current weather for a city\n"
+        "- /timezone <zone>: Time in a timezone\n"
+        "- /roll <dice> [sides]: Roll dice\n"
+        "- /encrypt <message> <key|passphrase>: Encrypts (Fernet; passphrase accepted)\n"
+        "- /decrypt <text> <key|passphrase>: Decrypts\n"
+        "- /hash <message> [alg]: Hash (sha256/sha512/blake2b/blake2s/md5)\n"
+        "- /restart: Restarts the bot (systemd)\n"
+        "- /execute <command>: Executes a command on the host"
     )
     await interaction.response.send_message(list)
 
-@bot.tree.command(name="ejemplo", description="Te saluda")
-async def ejemplo(interaction: discord.Interaction):
-    await interaction.response.send_message(f"¡Hola, {interaction.user.mention}!")
+@bot.tree.command(name="example", description="Greets you")
+async def example(interaction: discord.Interaction):
+    await interaction.response.send_message(f"Hello, {interaction.user.mention}!")
 
 
-@bot.tree.command(name="stats",description="Muestra estadísticas")
+@bot.tree.command(name="stats",description="Shows statistics")
 async def stats(interaction: discord.Interaction):
     cpu = psutil.cpu_percent(interval=1)
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage('/')
     tmp = psutil.disk_usage('/tmp')
-    # uptime en segundos desde el arranque
+    # uptime in seconds since boot
     boot = psutil.boot_time()
     elapsed = int(time.time() - boot)
     days = elapsed // 86400
@@ -174,91 +174,91 @@ async def stats(interaction: discord.Interaction):
     seconds = rem % 60
     uptime_str = f"{days:02d}:{hours:02d}:{minutes:02d}:{seconds:02d}"
     stats_msg = (
-        f"**Estadísticas de la Raspberry Pi:**\n"
+        f"**Raspberry Pi Statistics:**\n"
         f"CPU: {cpu}%\n"
         f"RAM: {mem.percent}% ({mem.used // (1024**2)}MB / {mem.total // (1024**2)}MB)\n"
-        f"Disco: {disk.percent}% ({disk.used // (1024**3)}GB / {disk.total // (1024**3)}GB)\n"
+        f"Disk: {disk.percent}% ({disk.used // (1024**3)}GB / {disk.total // (1024**3)}GB)\n"
         f"TMP: {tmp.percent}% ({tmp.used // (1024**3)}GB / {tmp.total // (1024**3)}GB)\n"
         f"Uptime (DD:HH:MM:SS): {uptime_str}"
     )
     await interaction.response.send_message(stats_msg)
 
-@bot.tree.command(name="reboot", description="Reinicia la Raspberry Pi")
+@bot.tree.command(name="reboot", description="Restarts the Raspberry Pi")
 async def reboot(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    await interaction.followup.send("Reiniciando la Raspberry Pi...", ephemeral=True)
+    await interaction.followup.send("Restarting the Raspberry Pi...", ephemeral=True)
     # Run reboot in background to avoid blocking
     asyncio.create_task(asyncio.to_thread(os.system, "sudo reboot"))
 
-@bot.tree.command(name="shutdown", description="Apaga la Raspberry Pi")
+@bot.tree.command(name="shutdown", description="Shuts down the Raspberry Pi")
 async def shutdown(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    await interaction.followup.send("Apagando la Raspberry Pi...", ephemeral=True)
+    await interaction.followup.send("Shutting down the Raspberry Pi...", ephemeral=True)
     asyncio.create_task(asyncio.to_thread(os.system, "sudo shutdown now"))
 
-@bot.tree.command(name="update", description="Actualiza el sistema")
+@bot.tree.command(name="update", description="Updates the system")
 async def update(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    await interaction.followup.send("Actualizando el sistema...", ephemeral=True)
+    await interaction.followup.send("Updating the system...", ephemeral=True)
     
     async def _run_update():
         code = await asyncio.to_thread(os.system, "sudo apt update && sudo apt upgrade -y")
         try:
-            await interaction.followup.send(f"Actualización finalizada (código {code}).", ephemeral=True)
+            await interaction.followup.send(f"Update finished (code {code}).", ephemeral=True)
         except Exception:
             pass
     
     asyncio.create_task(_run_update())
 
-@bot.tree.command(name="vpnstatus", description="Muestra el estado de la VPN")
+@bot.tree.command(name="vpnstatus", description="Shows VPN status")
 async def vpnstatus(interaction: discord.Interaction):
     await interaction.response.defer()
     vpn_status = await asyncio.to_thread(lambda: os.popen("sudo wg show").read())
-    await interaction.followup.send(f"Estado de la VPN:\n{vpn_status}")
+    await interaction.followup.send(f"VPN Status:\n{vpn_status}")
 
-@bot.tree.command(name="netdevices", description="Lista los dispositivos conectados a la red")
+@bot.tree.command(name="netdevices", description="Lists devices connected to the network")
 async def netdevices(interaction: discord.Interaction):
     await interaction.response.defer()
     net_devices = await asyncio.to_thread(lambda: os.popen("ip neigh").read())
-    await interaction.followup.send(f"Dispositivos conectados a la red:\n{net_devices}")
+    await interaction.followup.send(f"Devices connected to the network:\n{net_devices}")
 
 
 
-@bot.tree.command(name="ping", description="Realiza un ping a una dirección IP")
+@bot.tree.command(name="ping", description="Performs a ping to an IP address")
 async def ping(interaction: discord.Interaction, ip_address: str):
     await interaction.response.defer()
     # Use appropriate flag for Windows (-n) vs Linux (-c)
     flag = "-n" if platform.system().lower().startswith("win") else "-c"
     result = await asyncio.to_thread(lambda: os.popen(f"ping {flag} 4 {ip_address}").read())
-    await interaction.followup.send(f"Resultado del ping a {ip_address}:\n{result}")
+    await interaction.followup.send(f"Ping result to {ip_address}:\n{result}")
 
-@bot.tree.command(name="shorten", description="Acorta una url")
+@bot.tree.command(name="shorten", description="Shortens a URL")
 async def shorten(interaction: discord.Interaction, url:str):
     await interaction.response.defer()
     result = await asyncio.to_thread(lambda: os.popen(f'curl -s "https://is.gd/create.php?format=simple&url={url}"').read())
-    await interaction.followup.send(f"URL acortada:\n{result}")
+    await interaction.followup.send(f"Shortened URL:\n{result}")
 
 
-@bot.tree.command(name="whois", description="Busca información de un dominio")
+@bot.tree.command(name="whois", description="Searches domain information")
 async def whois(interaction: discord.Interaction, domain: str):
     await interaction.response.defer()
     result = await asyncio.to_thread(lambda: os.popen(f"whois {domain}").read())
-    await interaction.followup.send(f"Información de {domain}:\n```\n{result}\n```")
+    await interaction.followup.send(f"Information for {domain}:\n```\n{result}\n```")
 
-@bot.tree.command(name="speedtest", description="Realiza una prueba de velocidad de internet")
+@bot.tree.command(name="speedtest", description="Performs an internet speed test")
 async def speedtest(interaction: discord.Interaction):
     await interaction.response.defer()
     result = await asyncio.to_thread(lambda: os.popen("speedtest-cli --secure --simple").read())
-    await interaction.followup.send(f"Resultado de la prueba de velocidad:\n```\n{result}\n```")
+    await interaction.followup.send(f"Speed test result:\n```\n{result}\n```")
 
-@bot.tree.command(name="webping", description="Comprueba una URL (HTTP) y mide latencia")
-@app_commands.describe(url="URL a comprobar (http/https)", veces="Número de intentos (1-5, por defecto 3)")
-async def webping(interaction: discord.Interaction, url: str, veces: Optional[int] = 3):
-    # Normaliza URL
+@bot.tree.command(name="webping", description="Checks a URL (HTTP) and measures latency")
+@app_commands.describe(url="URL to check (http/https)", times="Number of attempts (1-5, default 3)")
+async def webping(interaction: discord.Interaction, url: str, times: Optional[int] = 3):
+    # Normalize URL
     if not url.startswith(("http://", "https://")):
         url = "http://" + url
 
-    tries = 3 if not isinstance(veces, int) else max(1, min(5, veces))
+    tries = 3 if not isinstance(times, int) else max(1, min(5, times))
     await interaction.response.defer()
 
     latencies: list[float] = []
@@ -273,7 +273,7 @@ async def webping(interaction: discord.Interaction, url: str, veces: Optional[in
             t0 = time.perf_counter()
             try:
                 async with session.get(url, allow_redirects=True, ssl=False) as resp:
-                    _ = await resp.read()  # leer para medir bien
+                    _ = await resp.read()  # read to measure properly
                     dt = (time.perf_counter() - t0) * 1000.0
                     latencies.append(dt)
                     statuses.append(resp.status)
@@ -288,12 +288,12 @@ async def webping(interaction: discord.Interaction, url: str, veces: Optional[in
     worst = max(latencies) if latencies else 0.0
 
     status_line = (
-        f"HTTP OK ({len(ok)}/{tries}) " + (f"Último: {statuses[-1]}" if statuses else ("Error" if errors else ""))
+        f"HTTP OK ({len(ok)}/{tries}) " + (f"Last: {statuses[-1]}" if statuses else ("Error" if errors else ""))
     )
     msg = (
-        f"Web ping a {url}:\n"
+        f"Web ping to {url}:\n"
         f"{status_line}\n"
-        f"Latencia ms -> media: {avg:.1f}, mejor: {best:.1f}, peor: {worst:.1f}"
+        f"Latency ms -> avg: {avg:.1f}, best: {best:.1f}, worst: {worst:.1f}"
     )
 
     if errors and len(errors) == tries:
@@ -301,7 +301,7 @@ async def webping(interaction: discord.Interaction, url: str, veces: Optional[in
 
     await interaction.followup.send(msg)
 
-@bot.tree.command(name="screenshotweb", description="Toma una captura de pantalla de una página web")
+@bot.tree.command(name="screenshotweb", description="Takes a screenshot of a web page")
 async def screenshotweb(interaction: discord.Interaction, url: str):
     if not url.startswith(("http://", "https://")):
         url = "http://" + url
@@ -317,10 +317,10 @@ async def screenshotweb(interaction: discord.Interaction, url: str):
             lambda: urllib.request.urlopen(screenshot_url, timeout=20).read()
         )
     except Exception as e:
-        await interaction.followup.send(f"No se pudo obtener la captura: {e}")
+        await interaction.followup.send(f"Could not get screenshot: {e}")
         return
 
-    # Guardar en Nextcloud con nombre único
+    # Save to Nextcloud with unique name
     out_dir = get_output_dir("screenshots")
     parsed = urlparse(url)
     host = parsed.netloc or "screenshot"
@@ -331,10 +331,10 @@ async def screenshotweb(interaction: discord.Interaction, url: str):
         pass
 
     file = discord.File(fp=io.BytesIO(image_bytes), filename=target.name)
-    await interaction.followup.send(content=f"Captura de pantalla de {url}:", file=file)
+    await interaction.followup.send(content=f"Screenshot of {url}:", file=file)
 
 
-@bot.tree.command(name="qr", description="Genera un código QR a partir de una URL")
+@bot.tree.command(name="qr", description="Generates a QR code from a URL")
 async def qr(interaction: discord.Interaction, url: str):
     await interaction.response.defer()
     if not url.startswith(("http://", "https://")):
@@ -347,24 +347,24 @@ async def qr(interaction: discord.Interaction, url: str):
             lambda: urllib.request.urlopen(qr_url, timeout=20).read()
         )
         file = discord.File(fp=io.BytesIO(image_bytes), filename="qr.png")
-        await interaction.followup.send(content=f"Código QR de {url}:", file=file)
+        await interaction.followup.send(content=f"QR code for {url}:", file=file)
     except Exception as e:
-        await interaction.followup.send(f"No se pudo generar el código QR: {e}")
+        await interaction.followup.send(f"Could not generate QR code: {e}")
 
 
-@bot.tree.command(name="passw", description="Genera una contraseña")
+@bot.tree.command(name="passw", description="Generates a password")
 async def passw(interaction: discord.Interaction, chars: int):
     await interaction.response.defer()
     password = ''.join(random.choices(string.ascii_letters + string.digits, k=chars))
-    await interaction.followup.send(f"Aquí tienes tu contraseña: {password}")
+    await interaction.followup.send(f"Here's your password: {password}")
 
-@bot.tree.command(name="mergepdf", description="Junta varios PDF adjuntos en uno solo")
+@bot.tree.command(name="mergepdf", description="Merges multiple attached PDFs into one")
 @app_commands.describe(
-    file1="PDF 1 (obligatorio)",
-    file2="PDF 2 (opcional)",
-    file3="PDF 3 (opcional)",
-    file4="PDF 4 (opcional)",
-    file5="PDF 5 (opcional)",
+    file1="PDF 1 (required)",
+    file2="PDF 2 (optional)",
+    file3="PDF 3 (optional)",
+    file4="PDF 4 (optional)",
+    file5="PDF 5 (optional)",
 )
 async def mergepdf(
     interaction: discord.Interaction,
@@ -378,39 +378,39 @@ async def mergepdf(
 
     attachments = [f for f in [file1, file2, file3, file4, file5] if f is not None]
     if len(attachments) < 2:
-        await interaction.followup.send("Adjunta al menos 2 PDFs.", ephemeral=True)
+        await interaction.followup.send("Attach at least 2 PDFs.", ephemeral=True)
         return
 
-    # Validación básica de tipo
+    # Basic type validation
     for a in attachments:
         name = (a.filename or "").lower()
         ctype = (a.content_type or "").lower()
         if not (name.endswith(".pdf") or "pdf" in ctype):
-            await interaction.followup.send(f"'{a.filename}' no parece ser un PDF.", ephemeral=True)
+            await interaction.followup.send(f"'{a.filename}' doesn't appear to be a PDF.", ephemeral=True)
             return
 
     try:
         from pypdf import PdfReader, PdfWriter  # type: ignore
     except Exception:
         await interaction.followup.send(
-            "Falta la librería pypdf. Instálala con: pip install pypdf",
+            "pypdf library is missing. Install it with: pip install pypdf",
             ephemeral=True,
         )
         return
 
-    # Descargar y fusionar
+    # Download and merge
     writer = PdfWriter()
     try:
         for a in attachments:
             data = await a.read()
             reader = PdfReader(io.BytesIO(data))
-            # Manejar PDFs encriptados sin contraseña
+            # Handle encrypted PDFs without password
             if reader.is_encrypted:
                 try:
                     reader.decrypt("")
                 except Exception:
                     await interaction.followup.send(
-                        f"El PDF '{a.filename}' está protegido y no se puede abrir.",
+                        f"PDF '{a.filename}' is protected and cannot be opened.",
                         ephemeral=True,
                     )
                     return
@@ -422,11 +422,11 @@ async def mergepdf(
         writer.close()
         buf.seek(0)
     except Exception as e:
-        await interaction.followup.send(f"No se pudieron combinar los PDFs: {e}", ephemeral=True)
+        await interaction.followup.send(f"Could not merge PDFs: {e}", ephemeral=True)
         return
 
     data = buf.getvalue()
-    # Guardar en Nextcloud con nombre único
+    # Save to Nextcloud with unique name
     out_dir = get_output_dir("pdfs")
     merged_path = unique_path(out_dir, "merged.pdf")
     try:
@@ -434,17 +434,17 @@ async def mergepdf(
     except Exception:
         pass
     merged_name = merged_path.name
-    LIMIT = 24 * 1024 * 1024  # ~24 MiB seguro para adjuntar
+    LIMIT = 24 * 1024 * 1024  # ~24 MiB safe for attachment
 
     if len(data) <= LIMIT:
         await interaction.followup.send(
-            content="Aquí tienes tu PDF combinado:",
+            content="Here's your merged PDF:",
             file=discord.File(fp=io.BytesIO(data), filename=merged_name),
         )
         return
     else:
         await interaction.followup.send(
-            f"El PDF combinado excede el límite para adjuntar. Se guardó como '{merged_name}'.",
+            f"The merged PDF exceeds the attachment limit. Saved as '{merged_name}'.",
             ephemeral=True,
         )
 
