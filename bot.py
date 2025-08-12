@@ -449,13 +449,13 @@ async def mergepdf(
         )
 
 
-@bot.tree.command(name="mergevid", description="Une dos videos en uno")
+@bot.tree.command(name="mergevid", description="Merges two videos into one")
 @app_commands.describe(
-    file1="Vídeo 1 (obligatorio)",
-    file2="Vídeo 2 (opcional)",
-    file3="Vídeo 3 (opcional)",
-    file4="Vídeo 4 (opcional)",
-    file5="Vídeo 5 (opcional)",
+    file1="Video 1 (required)",
+    file2="Video 2 (optional)",
+    file3="Video 3 (optional)",
+    file4="Video 4 (optional)",
+    file5="Video 5 (optional)",
 )
 async def mergevid(
     interaction: discord.Interaction,
@@ -465,26 +465,26 @@ async def mergevid(
     file4: Optional[discord.Attachment] = None,
     file5: Optional[discord.Attachment] = None,
 ):
-    """Concatena 2-5 vídeos en un MP4. Intenta primero "stream copy" y, si falla, re-codifica."""
+    """Concatenates 2-5 videos into an MP4. First tries "stream copy" and if it fails, re-encodes."""
     await interaction.response.defer()
 
     attachments = [f for f in [file1, file2, file3, file4, file5] if f is not None]
     if len(attachments) < 2:
-        await interaction.followup.send("Adjunta al menos 2 vídeos.", ephemeral=True)
+        await interaction.followup.send("Attach at least 2 videos.", ephemeral=True)
         return
 
-    # Validación básica de tipo
+    # Basic type validation
     video_exts = (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".ts")
     for a in attachments:
         name = (a.filename or "").lower()
         ctype = (a.content_type or "").lower()
         if not (name.endswith(video_exts) or ctype.startswith("video/")):
             await interaction.followup.send(
-                f"'{a.filename}' no parece ser un vídeo.", ephemeral=True
+                f"'{a.filename}' doesn't appear to be a video.", ephemeral=True
             )
             return
 
-    # Comprobar ffmpeg disponible
+    # Check ffmpeg available
     async def _check_ffmpeg() -> bool:
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -499,20 +499,20 @@ async def mergevid(
 
     if not await _check_ffmpeg():
         await interaction.followup.send(
-            "ffmpeg no está disponible en el sistema. Instálalo para usar /mergevid.",
+            "ffmpeg is not available on the system. Install it to use /mergevid.",
             ephemeral=True,
         )
         return
 
-    LIMIT = 24 * 1024 * 1024  # ~24 MiB seguro para adjuntar
+    LIMIT = 24 * 1024 * 1024  # ~24 MiB safe for attachment
 
-    # Flujo principal: descargar a temp, intentar concat demuxer (-c copy), si falla re-codificar.
+    # Main flow: download to temp, try concat demuxer (-c copy), if it fails re-encode.
     try:
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
             local_files: list[Path] = []
 
-            # Descargar adjuntos a ficheros temporales
+            # Download attachments to temporary files
             for idx, att in enumerate(attachments):
                 data = await att.read()
                 suffix = Path(att.filename or f"vid{idx}.mp4").suffix or ".mp4"
@@ -522,12 +522,12 @@ async def mergevid(
 
             out_path = td_path / "merged.mp4"
 
-            # 1) Intento rápido: demuxer concat con copia de streams
+            # 1) Quick attempt: concat demuxer with stream copy
             list_file = td_path / "inputs.txt"
 
             def _quote_for_concat(path: Path) -> str:
                 s = str(path)
-                # Escapar comillas simples según concat demuxer
+                # Escape single quotes according to concat demuxer
                 s = s.replace("'", "'\\''")
                 return f"file '{s}'"
 
@@ -545,8 +545,8 @@ async def mergevid(
             _, err1 = await proc1.communicate()
 
             if proc1.returncode != 0 or not out_path.exists():
-                # 2) Fallback: re-codificar con concat filter
-                # Detectar si todos tienen audio
+                # 2) Fallback: re-encode with concat filter
+                # Detect if all have audio
                 async def _has_audio(p: Path) -> bool:
                     try:
                         proc = await asyncio.create_subprocess_exec(
@@ -566,7 +566,7 @@ async def mergevid(
                 audio_flags = await asyncio.gather(*(_has_audio(p) for p in local_files))
                 all_have_audio = all(audio_flags)
 
-                # Construir comando ffmpeg con entradas
+                # Build ffmpeg command with inputs
                 args = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
                 for p in local_files:
                     args += ["-i", str(p)]
@@ -584,7 +584,7 @@ async def mergevid(
                         str(out_path),
                     ]
                 else:
-                    # Sin audio (o mezcla dispar). Concatenamos solo vídeo y silenciamos audio.
+                    # No audio (or mixed). Concatenate video only and silence audio.
                     v_in = "".join(f"[{i}:v:0]" for i in range(n))
                     filter_str = f"{v_in}concat=n={n}:v=1:a=0[v]"
                     args += [
@@ -602,18 +602,18 @@ async def mergevid(
                 )
                 _, err2 = await proc2.communicate()
                 if proc2.returncode != 0 or not out_path.exists():
-                    # Falla definitiva
+                    # Definitive failure
                     tail = (err2 or err1 or b"").decode(errors="ignore")
                     tail = tail[-600:]
                     await interaction.followup.send(
-                        "No se pudo unir los vídeos. Detalle técnico:\n" + tail,
+                        "Could not merge videos. Technical detail:\n" + tail,
                         ephemeral=True,
                     )
                     return
 
-            # Enviar resultado si no excede el límite
+            # Send result if it doesn't exceed the limit
             out_bytes = out_path.read_bytes()
-            # Guardar en Nextcloud con nombre único
+            # Save to Nextcloud with unique name
             out_dir = get_output_dir("videos")
             final_path = unique_path(out_dir, "merged.mp4")
             try:
@@ -625,27 +625,27 @@ async def mergevid(
                     pass
             if len(out_bytes) > LIMIT:
                 await interaction.followup.send(
-                    f"El vídeo resultante excede el límite de adjuntos del bot. Se guardó como '{final_path.name}'.",
+                    f"The resulting video exceeds the bot's attachment limit. Saved as '{final_path.name}'.",
                     ephemeral=True,
                 )
                 return
 
             await interaction.followup.send(
-                content="Aquí tienes tu vídeo unido:",
+                content="Here's your merged video:",
                 file=discord.File(fp=io.BytesIO(out_bytes), filename=final_path.name),
             )
             return
     except Exception as e:
-        await interaction.followup.send(f"Ocurrió un error al unir los vídeos: {e}", ephemeral=True)
+        await interaction.followup.send(f"An error occurred while merging videos: {e}", ephemeral=True)
         return
 
 
 
 
-@bot.tree.command(name="remind", description="Crea un recordatorio")
+@bot.tree.command(name="remind", description="Creates a reminder")
 @app_commands.describe(
-    time="Tiempo hasta el recordatorio (en minutos)",
-    message="Mensaje del recordatorio"
+    time="Time until reminder (in minutes)",
+    message="Reminder message"
 )
 async def remind(
     interaction: discord.Interaction,
@@ -655,19 +655,19 @@ async def remind(
     await interaction.response.defer()
 
     if time < 1:
-        await interaction.followup.send("El tiempo debe ser al menos 1 minuto.", ephemeral=True)
+        await interaction.followup.send("Time must be at least 1 minute.", ephemeral=True)
         return
 
-    await interaction.followup.send(f"Recordatorio configurado para dentro de {time} minutos.")
+    await interaction.followup.send(f"Reminder set for {time} minutes from now.")
 
     await asyncio.sleep(time * 60)
-    await interaction.followup.send(f"¡Recordatorio! {message}")
+    await interaction.followup.send(f"Reminder! {message}")
 
 
-@bot.tree.command(name="habit", description="Crea un recordatorio recurrente")
+@bot.tree.command(name="habit", description="Creates a recurring reminder")
 @app_commands.describe(
-    time="Tiempo entre repeticiones (en minutos)",
-    message="Mensaje del recordatorio"
+    time="Time between repetitions (in minutes)",
+    message="Reminder message"
 )
 async def habit(
     interaction: discord.Interaction,
@@ -677,33 +677,33 @@ async def habit(
     await interaction.response.defer()
 
     if time < 1:
-        await interaction.followup.send("El tiempo debe ser al menos 1 minuto.", ephemeral=True)
+        await interaction.followup.send("Time must be at least 1 minute.", ephemeral=True)
         return
-    # Si ya existe un habit con el mismo mensaje, lo reemplazamos
+    # If a habit with the same message already exists, replace it
     if message in habit_tasks:
-        # Cancelar el anterior
+        # Cancel the previous one
         old_task = habit_tasks[message]["task"]
         old_task.cancel()
-        await interaction.followup.send(f"Habit existente actualizado: cada {time} minutos -> {message}")
+        await interaction.followup.send(f"Existing habit updated: every {time} minutes -> {message}")
     else:
-        await interaction.followup.send(f"Habit creado: cada {time} minutos -> {message}")
+        await interaction.followup.send(f"Habit created: every {time} minutes -> {message}")
 
     interval_minutes = time
 
     async def _habit_loop(msg: str, interval: int):
         try:
-            # Espera inicial antes del primer recordatorio (opcional). Si quieres enviar uno inmediato, quita la primera sleep.
+            # Initial wait before first reminder (optional). If you want to send one immediately, remove the first sleep.
             while True:
                 await asyncio.sleep(interval * 60)
                 try:
-                    await interaction.followup.send(f"¡Recordatorio! {msg}")
+                    await interaction.followup.send(f"Reminder! {msg}")
                 except Exception:
                     pass
         except asyncio.CancelledError:
-            # Limpieza al cancelar
+            # Cleanup when cancelled
             pass
         finally:
-            # Eliminar de registro si sigue apuntando a esta tarea
+            # Remove from registry if it still points to this task
             current = habit_tasks.get(msg)
             if current and current.get("task") == asyncio.current_task():
                 habit_tasks.pop(msg, None)
@@ -712,19 +712,19 @@ async def habit(
     habit_tasks[message] = {"interval": interval_minutes, "task": task}
 
 
-@bot.tree.command(name="listhabit", description="Lista habits")
+@bot.tree.command(name="listhabit", description="Lists habits")
 async def listhabit(interaction: discord.Interaction):
     await interaction.response.defer()
 
     if not habit_tasks:
-        await interaction.followup.send("No hay habits configurados.")
+        await interaction.followup.send("No habits configured.")
         return
-    habit_messages = [f"- Cada {data['interval']} minutos: {msg}" for msg, data in habit_tasks.items()]
-    await interaction.followup.send("Lista de habits:\n" + "\n".join(habit_messages))
+    habit_messages = [f"- Every {data['interval']} minutes: {msg}" for msg, data in habit_tasks.items()]
+    await interaction.followup.send("Habit list:\n" + "\n".join(habit_messages))
 
-@bot.tree.command(name="deletehabit", description="Elimina un habit")
+@bot.tree.command(name="deletehabit", description="Deletes a habit")
 @app_commands.describe(
-    message="Mensaje del habit a eliminar"
+    message="Message of habit to delete"
 )
 async def deletehabit(
     interaction: discord.Interaction,
@@ -733,22 +733,22 @@ async def deletehabit(
     await interaction.response.defer()
     data = habit_tasks.get(message)
     if not data:
-        await interaction.followup.send("Habit no encontrado.", ephemeral=True)
+        await interaction.followup.send("Habit not found.", ephemeral=True)
         return
     task: asyncio.Task = data["task"]
     task.cancel()
-    # Eliminación la maneja el finally del loop, pero limpiamos por si acaso
+    # Deletion is handled by the loop's finally, but clean up just in case
     habit_tasks.pop(message, None)
-    await interaction.followup.send(f"Habit eliminado: {message}")
+    await interaction.followup.send(f"Habit deleted: {message}")
     return
 
 
 
 
-@bot.tree.command(name="translate", description="Traduce un texto a otro idioma")
+@bot.tree.command(name="translate", description="Translates text to another language")
 @app_commands.describe(
-    text="Texto a traducir",
-    target_language="Idioma al que traducir"
+    text="Text to translate",
+    target_language="Language to translate to"
 )
 async def translate(
     interaction: discord.Interaction,
@@ -757,7 +757,7 @@ async def translate(
 ):
     await interaction.response.defer()
 
-    # Normaliza idioma objetivo y traduce usando MyMemory API
+    # Normalize target language and translate using MyMemory API
 
     lang_map = {
         "es": "es", "español": "es", "spanish": "es",
@@ -786,7 +786,7 @@ async def translate(
     if not target_code:
         candidate = norm.replace("_", "-")
         if candidate.isalpha() or ("-" in candidate and candidate.replace("-", "").isalpha()):
-            target_code = candidate[:5]  # acepta códigos como pt-br
+            target_code = candidate[:5]  # accept codes like pt-br
         else:
             target_code = "es"
 
@@ -828,18 +828,18 @@ async def translate(
             except Exception:
                 pass
     except Exception as e:
-        await interaction.followup.send(f"No se pudo traducir: {e}", ephemeral=True)
+        await interaction.followup.send(f"Could not translate: {e}", ephemeral=True)
         return
 
-    translated_text = f"Texto traducido a {target_language}: {text}"
+    translated_text = f"Text translated to {target_language}: {text}"
 
     await interaction.followup.send(translated_text)
 
 
-@bot.tree.command(name="definition", description="Busca la definición de una palabra")
+@bot.tree.command(name="definition", description="Searches for the definition of a word")
 @app_commands.describe(
-    word="Palabra a buscar",
-    language="Idioma en el que buscar la definición (opcional, por defecto es español)"
+    word="Word to search",
+    language="Language to search definition in (optional, default is Spanish)"
 )
 async def definition(
     interaction: discord.Interaction,
@@ -848,7 +848,7 @@ async def definition(
 ):
     await interaction.response.defer()
 
-    # Normaliza el idioma y consulta la API pública de DictionaryAPI
+    # Normalize the language and query the public DictionaryAPI
     lang_aliases = {
         "es": "es", "español": "es", "spanish": "es",
         "en": "en", "ingles": "en", "inglés": "en", "english": "en",
@@ -870,7 +870,7 @@ async def definition(
 
     term = (word or "").strip()
     if not term:
-        await interaction.followup.send("Proporciona una palabra válida.")
+        await interaction.followup.send("Provide a valid word.")
         return
 
     try:
@@ -905,13 +905,13 @@ async def definition(
 
         if definitions:
             await interaction.followup.send(
-                f"Definición de '{word}' en {language}:\n" + "\n".join(definitions)
+                f"Definition of '{word}' in {language}:\n" + "\n".join(definitions)
             )
         else:
-            # Mensaje de no encontrado
+            # Not found message
             msg = data.get("message") if isinstance(data, dict) else None
             await interaction.followup.send(
-                msg or f"No se encontraron definiciones para '{word}' en {language}."
+                msg or f"No definitions found for '{word}' in {language}."
             )
         return
     except Exception as e:
@@ -948,7 +948,7 @@ async def definition(
                 
                 if definitions:
                     await interaction.followup.send(
-                        f"Definición de '{word}' en inglés (no encontrada en {language}):\n" + "\n".join(definitions)
+                        f"Definition of '{word}' in English (not found in {language}):\n" + "\n".join(definitions)
                     )
                     return
             except Exception as e2:
@@ -956,58 +956,58 @@ async def definition(
                 pass
         
         await interaction.followup.send(
-            f"No se pudo obtener la definición. Error: {str(e)[:100]}", ephemeral=True
+            f"Could not get definition. Error: {str(e)[:100]}", ephemeral=True
         )
 
 
-@bot.tree.command(name="weather", description="Muestra el tiempo actual de una ciudad (sin API key)")
-async def weather(interaction: discord.Interaction, lugar: str):
+@bot.tree.command(name="weather", description="Shows current weather for a city (no API key required)")
+async def weather(interaction: discord.Interaction, place: str):
     await interaction.response.defer()
 
     def code_info(code: int | None) -> tuple[str, str]:
         mapping = {
-            0: ("Despejado", "☀️"),
-            1: ("Mayormente despejado", "🌤️"),
-            2: ("Parcialmente nublado", "⛅"),
-            3: ("Nublado", "☁️"),
-            45: ("Niebla", "🌫️"),
-            48: ("Niebla con escarcha", "🌫️"),
-            51: ("Llovizna ligera", "🌦️"),
-            53: ("Llovizna moderada", "🌦️"),
-            55: ("Llovizna intensa", "🌧️"),
-            56: ("Llovizna helada ligera", "🌧️"),
-            57: ("Llovizna helada intensa", "🌧️"),
-            61: ("Lluvia ligera", "🌧️"),
-            63: ("Lluvia moderada", "🌧️"),
-            65: ("Lluvia intensa", "🌧️"),
-            66: ("Lluvia helada ligera", "🌧️"),
-            67: ("Lluvia helada intensa", "🌧️"),
-            71: ("Nieve ligera", "🌨️"),
-            73: ("Nieve moderada", "🌨️"),
-            75: ("Nieve intensa", "❄️"),
-            77: ("Granizo fino", "🌨️"),
-            80: ("Chubascos ligeros", "🌦️"),
-            81: ("Chubascos moderados", "🌦️"),
-            82: ("Chubascos fuertes", "🌧️"),
-            85: ("Chubascos de nieve ligeros", "🌨️"),
-            86: ("Chubascos de nieve fuertes", "❄️"),
-            95: ("Tormenta", "⛈️"),
-            96: ("Tormenta con granizo", "⛈️"),
-            99: ("Tormenta fuerte con granizo", "⛈️"),
+            0: ("Clear", "☀️"),
+            1: ("Mostly clear", "🌤️"),
+            2: ("Partly cloudy", "⛅"),
+            3: ("Cloudy", "☁️"),
+            45: ("Fog", "🌫️"),
+            48: ("Fog with frost", "🌫️"),
+            51: ("Light drizzle", "🌦️"),
+            53: ("Moderate drizzle", "🌦️"),
+            55: ("Heavy drizzle", "🌧️"),
+            56: ("Light freezing drizzle", "🌧️"),
+            57: ("Heavy freezing drizzle", "🌧️"),
+            61: ("Light rain", "🌧️"),
+            63: ("Moderate rain", "🌧️"),
+            65: ("Heavy rain", "🌧️"),
+            66: ("Light freezing rain", "🌧️"),
+            67: ("Heavy freezing rain", "🌧️"),
+            71: ("Light snow", "🌨️"),
+            73: ("Moderate snow", "🌨️"),
+            75: ("Heavy snow", "❄️"),
+            77: ("Fine hail", "🌨️"),
+            80: ("Light showers", "🌦️"),
+            81: ("Moderate showers", "🌦️"),
+            82: ("Heavy showers", "🌧️"),
+            85: ("Light snow showers", "🌨️"),
+            86: ("Heavy snow showers", "❄️"),
+            95: ("Thunderstorm", "⛈️"),
+            96: ("Thunderstorm with hail", "⛈️"),
+            99: ("Heavy thunderstorm with hail", "⛈️"),
         }
-        return mapping.get(int(code) if code is not None else -1, ("Tiempo", "🌡️"))
+        return mapping.get(int(code) if code is not None else -1, ("Weather", "🌡️"))
 
     try:
-        # Geocodificar el lugar
+        # Geocode the place
         geo_url = (
             "https://geocoding-api.open-meteo.com/v1/search?" +
-            urllib.parse.urlencode({"name": lugar, "count": 1, "language": "es", "format": "json"})
+            urllib.parse.urlencode({"name": place, "count": 1, "language": "en", "format": "json"})
         )
         geo_bytes = await asyncio.to_thread(lambda: urllib.request.urlopen(geo_url, timeout=15).read())
         geo = json.loads(geo_bytes.decode("utf-8"))
         results = geo.get("results") or []
         if not results:
-            await interaction.followup.send("No encontré esa ubicación.", ephemeral=True)
+            await interaction.followup.send("I couldn't find that location.", ephemeral=True)
             return
         g = results[0]
         lat, lon = g["latitude"], g["longitude"]
@@ -1015,7 +1015,7 @@ async def weather(interaction: discord.Interaction, lugar: str):
         admin1 = g.get("admin1")
         country = g.get("country")
 
-        # Tiempo actual
+        # Current weather
         current_params = ",".join([
             "temperature_2m",
             "relative_humidity_2m",
@@ -1048,7 +1048,7 @@ async def weather(interaction: discord.Interaction, lugar: str):
         code = current.get("weather_code")
         desc, emoji = code_info(code)
 
-        header = f"Tiempo en {loc_name}"
+        header = f"Weather in {loc_name}"
         if admin1:
             header += f", {admin1}"
         if country:
@@ -1058,81 +1058,81 @@ async def weather(interaction: discord.Interaction, lugar: str):
         if temp is not None:
             msg += f"Temp: {temp}°C"
             if app_temp is not None:
-                msg += f" (sensación {app_temp}°C)"
+                msg += f" (feels like {app_temp}°C)"
             msg += "\n"
         if rh is not None:
-            msg += f"Humedad: {rh}%\n"
+            msg += f"Humidity: {rh}%\n"
         if wind is not None:
-            msg += f"Viento: {wind} km/h"
+            msg += f"Wind: {wind} km/h"
             if wind_dir is not None:
                 msg += f" ({wind_dir}°)"
             msg += "\n"
 
         await interaction.followup.send(msg)
     except Exception as e:
-        await interaction.followup.send(f"No pude obtener el clima: {e}", ephemeral=True)
+        await interaction.followup.send(f"I couldn't get the weather: {e}", ephemeral=True)
 
-@bot.tree.command(name="timezone", description="Consulta la hora en otra zona horaria")
-async def timezone(interaction: discord.Interaction, zona: str):
+@bot.tree.command(name="timezone", description="Check time in another timezone")
+async def timezone(interaction: discord.Interaction, zone: str):
     await interaction.response.defer()
     try:
-        # Obtener la hora actual en la zona horaria especificada
-        tz = pytz.timezone(zona)
-        hora_actual = datetime.datetime.now(tz).strftime("%H:%M:%S")
-        await interaction.followup.send(f"La hora actual en {zona} es {hora_actual}.")
+        # Get current time in the specified timezone
+        tz = pytz.timezone(zone)
+        current_time = datetime.datetime.now(tz).strftime("%H:%M:%S")
+        await interaction.followup.send(f"Current time in {zone} is {current_time}.")
     except Exception as e:
-        await interaction.followup.send(f"No pude obtener la hora: {e}", ephemeral=True)
+        await interaction.followup.send(f"I couldn't get the time: {e}", ephemeral=True)
 
-@bot.tree.command(name="restart", description="Reincia el bot")
+@bot.tree.command(name="restart", description="Restarts the bot")
 async def restart(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
         service = os.getenv("SERVICE_NAME", "utilsbot.service")
         await asyncio.to_thread(os.system, f"sudo systemctl restart {service}")
-        await interaction.followup.send("Reiniciando el bot...", ephemeral=True)
+        await interaction.followup.send("Restarting the bot...", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"No pude reiniciar el bot: {e}", ephemeral=True)
+        await interaction.followup.send(f"I couldn't restart the bot: {e}", ephemeral=True)
 
-@bot.tree.command(name="execute", description="Ejecuta un comando en la Raspberry Pi")
+@bot.tree.command(name="execute", description="Executes a command on the Raspberry Pi")
 async def execute(interaction: discord.Interaction, command: str):
     await interaction.response.defer()
     try:
         output = await asyncio.to_thread(lambda: subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT))
-        await interaction.followup.send(f"Salida del comando:\n```\n{output.decode()}\n```")
+        await interaction.followup.send(f"Command output:\n```\n{output.decode()}\n```")
     except Exception as e:
-        await interaction.followup.send(f"No pude ejecutar el comando: {e}", ephemeral=True)
+        await interaction.followup.send(f"I couldn't execute the command: {e}", ephemeral=True)
 
 @bot.tree.command(name="roll", description="Rolls a dice")
 async def roll(interaction: discord.Interaction, dices: int, sides: int = 6):
     await interaction.response.defer()
     results = [random.randint(1, sides) for _ in range(dices)]
-    await interaction.followup.send(f"Resultados de la tirada de {dices} dados de {sides} caras: {results}")
+    await interaction.followup.send(f"Results of rolling {dices} {sides}-sided dice: {results}")
 
-@bot.tree.command(name="encrypt", description="Encripta un mensaje")
+@bot.tree.command(name="encrypt", description="Encrypts a message")
 async def encrypt(interaction: discord.Interaction, message: str, key: str):
     await interaction.response.defer()
     try:
         norm_key = _normalize_fernet_key(key)
         fernet = Fernet(norm_key)
         encrypted = fernet.encrypt(message.encode()).decode()
-        # Simplificado: siempre mostramos solo el texto encriptado; la misma passphrase sirve para desencriptar.
-        await interaction.followup.send(f"Mensaje encriptado:\n```\n{encrypted}\n```")
+        # Simplified: always show only the encrypted text; the same passphrase serves to decrypt.
+        await interaction.followup.send(f"Encrypted message:\n```\n{encrypted}\n```")
     except Exception as e:
-        await interaction.followup.send(f"No pude encriptar el mensaje: {e}", ephemeral=True)
+        await interaction.followup.send(f"I couldn't encrypt the message: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="decrypt", description="Desencripta un mensaje")
+@bot.tree.command(name="decrypt", description="Decrypts a message")
 async def decrypt(interaction: discord.Interaction, message: str, key: str):
     await interaction.response.defer()
     try:
         norm_key = _normalize_fernet_key(key)
         fernet = Fernet(norm_key)
         decrypted = fernet.decrypt(message.encode()).decode()
-        await interaction.followup.send(f"Mensaje desencriptado:\n```\n{decrypted}\n```")
+        await interaction.followup.send(f"Decrypted message:\n```\n{decrypted}\n```")
     except Exception as e:
-        await interaction.followup.send(f"No pude desencriptar el mensaje: {e}", ephemeral=True)
+        await interaction.followup.send(f"I couldn't decrypt the message: {e}", ephemeral=True)
 
-@bot.tree.command(name="hash", description="Genera un hash de un mensaje(por defecto Sha-256)")
+@bot.tree.command(name="hash", description="Generates a hash of a message (SHA-256 by default)")
 async def hash(interaction: discord.Interaction, message: str, algorithm: str = "sha256"):
     await interaction.response.defer()
     try:
@@ -1147,32 +1147,32 @@ async def hash(interaction: discord.Interaction, message: str, algorithm: str = 
         elif algorithm == "md5":
             hash_object = hashlib.md5(message.encode())
         else:
-            await interaction.followup.send(f"Algoritmo no soportado: {algorithm}", ephemeral=True)
+            await interaction.followup.send(f"Algorithm not supported: {algorithm}", ephemeral=True)
             return
 
         hash_hex = hash_object.hexdigest()
         await interaction.followup.send(f"Hash ({algorithm}):\n```\n{hash_hex}\n```")
     except Exception as e:
-        await interaction.followup.send(f"No pude generar el hash: {e}", ephemeral=True)
+        await interaction.followup.send(f"I couldn't generate the hash: {e}", ephemeral=True)
 
 @bot.event
 async def on_ready():
-    # Sincroniza los slash commands con Discord al iniciar
+    # Sync slash commands with Discord on startup
     try:
         synced = await bot.tree.sync()
-        print(f"Slash commands sincronizados: {len(synced)}")
+        print(f"Slash commands synchronized: {len(synced)}")
     except Exception as e:
-        print(f"No se pudieron sincronizar los comandos: {e}")
+        print(f"Could not synchronize commands: {e}")
     user = getattr(bot, "user", None)
     if user:
-        print(f"Conectado como {user} (ID: {user.id})")
+        print(f"Connected as {user} (ID: {user.id})")
 
 
 if __name__ == "__main__":
-    # Carga .env si python-dotenv está disponible
+    # Load .env if python-dotenv is available
     try:
         import dotenv  # type: ignore
-        # Buscar .env en cwd y junto al script, y soportar .ENV (Linux es case-sensitive)
+        # Look for .env in cwd and next to the script, and support .ENV (Linux is case-sensitive)
         here = Path(__file__).parent
         candidates = [
             Path.cwd() / ".env",
@@ -1195,6 +1195,6 @@ if __name__ == "__main__":
         pass
     token = os.getenv("DISCORD_TOKEN")
     if not token:
-        raise SystemExit("Falta la variable de entorno DISCORD_TOKEN.")
+        raise SystemExit("Missing DISCORD_TOKEN environment variable.")
     bot.run(token)
 
