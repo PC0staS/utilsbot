@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+
+# Environment files (will be mounted)
+.env
+.ENV
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+.venv
+venv
+env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output directories (will be mounted)
+output/
+Screenshots/
+Merged*
+
+# Documentation (not needed in container)
+*.md
+CONTRIBUTING.md
+SECURITY.md
+LICENSE
+Roadmap.md
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
