@@ -18,6 +18,7 @@ Handy utilities for your Discord server: merge PDFs and videos, capture web scre
 - Quick start
 - Configuration
 - Nextcloud integration
+- Docker deployment
 - Systemd service (optional)
 - Troubleshooting
 - Contributing • Code of Conduct • Security • License
@@ -62,6 +63,33 @@ Handy utilities for your Discord server: merge PDFs and videos, capture web scre
 - /roll dices [sides]
 
 ## Quick start
+
+### Option 1: Docker (Recommended)
+
+1) Clone the repository
+```bash
+git clone https://github.com/PC0staS/utilsbot.git
+cd utilsbot
+```
+
+2) Configure environment
+```bash
+cp .env.example .env
+# Edit .env and set your DISCORD_TOKEN
+```
+
+3) Build and run with Docker Compose
+```bash
+docker compose up -d
+```
+
+4) Check logs
+```bash
+docker compose logs -f utilsbot
+```
+
+### Option 2: Direct Python Installation
+
 1) Create and activate a virtual environment
 - Windows PowerShell
 	- python -m venv .venv
@@ -89,9 +117,8 @@ Copy .env.example to .env and set:
 - SERVICE_NAME: Systemd service name for /restart (optional; default utilsbot.service).
 
 Requirements
-- Python 3.10+
-- ffmpeg/ffprobe on PATH for /mergevid
-- speedtest-cli for /speedtest (installed via requirements.txt)
+- **For Docker:** Docker and Docker Compose
+- **For direct installation:** Python 3.10+, ffmpeg/ffprobe on PATH for /mergevid, speedtest-cli for /speedtest (installed via requirements.txt)
 
 ## Nextcloud integration
 - Base folder (configurable via NEXTCLOUD_DIR):
@@ -101,6 +128,61 @@ Requirements
 	- Merged videos – concatenated videos
 	- Screenshots – URL captures
 - Unique filenames prevent overwrites.
+
+## Docker Deployment
+
+### Using Docker Compose (Recommended)
+
+1) **Configure environment:**
+   ```bash
+   cp .env.example .env
+   # Edit .env and set DISCORD_TOKEN=your_discord_bot_token
+   ```
+
+2) **Start the bot:**
+   ```bash
+   docker compose up -d
+   ```
+
+3) **View logs:**
+   ```bash
+   docker compose logs -f utilsbot
+   ```
+
+4) **Stop the bot:**
+   ```bash
+   docker compose down
+   ```
+
+### Manual Docker Commands
+
+1) **Build the image:**
+   ```bash
+   docker build -t utilsbot .
+   ```
+
+2) **Run the container:**
+   ```bash
+   docker run -d --name utilsbot \
+     --env-file .env \
+     -v ./output:/app/output \
+     --restart unless-stopped \
+     utilsbot
+   ```
+
+### Docker Configuration
+
+- **Volumes:**
+  - `./output:/app/output` - Output files (screenshots, PDFs, videos)
+  - `./.env:/app/.env:ro` - Environment configuration (read-only)
+  - Optional: Mount your Nextcloud directory for direct file access
+
+- **Environment Variables:**
+  - `DISCORD_TOKEN` - Your Discord bot token (required)
+  - `NEXTCLOUD_DIR` - Base folder for outputs (default: /app/output)
+  - `SERVICE_NAME` - Service name for restart command (default: utilsbot)
+
+- **Health Check:** The container includes a health check that monitors the bot process
 
 ## Systemd service (optional)
 Create /etc/systemd/system/utilsbot.service:
@@ -125,11 +207,20 @@ Then reload and start:
 - sudo systemctl enable --now utilsbot.service
 
 ## Troubleshooting
+
+### General Issues
 - Bot token error: ensure DISCORD_TOKEN is set in .env and the process can read it.
 - dotenv issues: the bot looks for .env in both the working directory and alongside bot.py (supports .env/.ENV). It will still run without dotenv if the environment variable is set by the shell/service.
 - ffmpeg not found: install ffmpeg and ensure it’s on PATH; required for /mergevid.
 - Permission errors on /execute or system commands: ensure the bot process user has the needed sudo rights (or adjust commands).
 - Encryption errors: ensure the Fernet key is a 32-byte URL-safe base64 value (generate with: from cryptography.fernet import Fernet; Fernet.generate_key()).
+
+### Docker-specific Issues
+- **Container fails to start:** Check logs with `docker compose logs utilsbot`
+- **Permission issues with output directory:** Ensure the ./output directory exists and is writable
+- **Network issues:** The container uses bridge networking for better Discord connectivity
+- **Memory issues:** Adjust resource limits in docker-compose.yml if needed
+- **Volume mount issues:** Ensure paths in docker-compose.yml are correct for your system
 
 ## Contributing
 See CONTRIBUTING.md. Please open an issue first for major changes.

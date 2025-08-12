@@ -1,0 +1,32 @@
+services:
+  utilsbot:
+    build: .
+    container_name: utilsbot
+    restart: unless-stopped
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - NEXTCLOUD_DIR=/app/output
+      - SERVICE_NAME=utilsbot
+    volumes:
+      # Mount for output files (screenshots, PDFs, videos)
+      - ./output:/app/output
+      # Mount for Nextcloud integration (optional - adjust path as needed)
+      # - /path/to/your/nextcloud:/mnt/nextcloud
+      # Mount for persistent .env file
+      - ./.env:/app/.env:ro
+    # Network mode for better Discord connectivity
+    network_mode: "bridge"
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import psutil; exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

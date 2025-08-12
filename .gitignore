@@ -8,3 +8,6 @@ __pycache__/
 venv/
 env/
 .python-version
+
+# Docker output volumes
+output/
